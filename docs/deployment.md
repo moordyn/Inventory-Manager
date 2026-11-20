@@ -1,15 +1,33 @@
-# Proxmox / Linux deployment
+# Ubuntu 24.04 Proxmox LXC installation
 
-Recommended: dedicated Debian or Ubuntu VM with Docker Engine and Docker Compose plugin.
+Prerequisite: Ubuntu 24.04 LXC with Docker-compatible nesting/keyctl configuration and working LAN networking.
 
-1. Clone the repository to the Linux VM.
-2. Copy `.env.example` to `.env`; set strong unique `POSTGRES_PASSWORD` and `INVENTORY_PIN`.
-3. Run `docker compose -f deploy/compose.yml --env-file .env up -d --build`.
-4. Verify `curl http://VM_LAN_IP:18424/health`.
-5. In existing Nginx proxy, configure hostname `inv.mrmschf.xyz`, upstream `http://VM_LAN_IP :18424`, HTTPS certificate, and WebSocket upgrade forwarding when realtime is enabled.
-6. Point the hostname DNS CNAME to `mrmschf.xyz` (or equivalent DNS configuration).
-7. Ensure Docker service is enabled at boot: `sudo systemctl enable --now docker`.
+## One-command installer
+Run as root in the **Inventory** LXC:
 
-Do **not** forward port 18424 or PostgreSQL port 5432 from the router to the internet. Only Nginx should be internet-facing. Configure firewall rules so only Nginx can access 8080 if possible.
+```bash
+curl -fsSL https://raw.githubusercontent.com/moordyn/Inventory-Manager/main/deploy/install.sh -o /tmp/inventory-install.sh
+bash /tmp/inventory-install.sh
+```
 
-The installer, automated backups, production authentication hardening, and deployment verification are pending milestones. Do not expose this initial API publicly until authentication and security checks are complete.
+The script installs Docker if missing, clones or fast-forwards the repository into `/opt/inventory-manager`, generates strong database and one-time setup secrets in `.env`, and builds/starts PostgreSQL and the API/web UI. It is designed to be rerunnable without resetting database volumes or PIN.
+
+Open `http://INVENTORY_LXC_IP:18424` locally. The first-run setup screen requests the one-time setup token printed by the installer and a new six-digit PIN (with confirmation). Keep the setup token secret. It is stored in `/opt/inventory-manager/.env` (permissions 0600) for future recovery, but cannot be reused to change a PIN once enrolled.
+
+## Nginx Proxy Manager
+Once tested and hardened, add proxy host:
+- Hostname: `inv.mrmschf.xyz`
+- Forward scheme: HTTP
+- Forward IP: Inventory LXC LAN IP
+- Forward port: `18424`
+- SSL: Existing Cloudflare Origin CA wildcard certificate
+- Cloudflare SSL mode: Full (strict)
+
+Only router ports 80 and 443 should forward to the Nginx LXC. Never forward 81, 18424 or 5432 publicly.
+
+## Operational notes
+`docker compose --env-file .env -f deploy/compose.yml ps` checks status.
+`docker compose --env-file .env -f deploy/compose.yml logs -f api` shows server logs.
+`bash deploy/install.sh` updates from GitHub and rebuilds.
+
+**Status:** Initial working prototype; builds, authentication hardening, backups, restore, mobile camera and full scanner functionality still require validation. Do not assume internet-facing production readiness merely because the containers start.
