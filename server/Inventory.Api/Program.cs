@@ -81,22 +81,22 @@ app.MapGet("/api/items", async (HttpContext ctx) =>
 {
     if (!await Authed(ctx)) return Results.Unauthorized();
     await using var c = await Connect();
-    await using var cmd = new NpgsqlCommand("SELECT id,sku,name,quantity FROM items ORDER BY name LIMIT 500", c);
+    await using var cmd = new NpgsqlCommand("SELECT id,sku,name,quantity,COALESCE(category,''),COALESCE(barcode,''),min_stock,unit_cost,COALESCE(description,'') FROM items ORDER BY name LIMIT 1000", c);
     await using var r = await cmd.ExecuteReaderAsync();
     var list = new List<object>();
-    while (await r.ReadAsync()) list.Add(new { id=r.GetGuid(0),sku=r.GetString(1),name=r.GetString(2),quantity=r.GetInt32(3) });
+    while (await r.ReadAsync()) list.Add(new { id=r.GetGuid(0),sku=r.GetString(1),name=r.GetString(2),quantity=r.GetInt32(3),category=r.GetString(4),barcode=r.GetString(5),minStock=r.GetInt32(6),unitCost=r.IsDBNull(7)?(decimal?)null:r.GetDecimal(7),description=r.GetString(8) });
     return Results.Ok(list);
 });
 app.MapPost("/api/items", async (HttpContext ctx, NewItem req) =>
 {
     if (!await Authed(ctx)) return Results.Unauthorized();
-    if (string.IsNullOrWhiteSpace(req.Sku) || string.IsNullOrWhiteSpace(req.Name) || req.Quantity < 0) return Results.BadRequest("Invalid item");
+    if (string.IsNullOrWhiteSpace(req.Sku) || string.IsNullOrWhiteSpace(req.Name) || req.Quantity < 0 || req.MinStock < 0 || req.UnitCost < 0) return Results.BadRequest("Invalid item");
     await using var c = await Connect();
     await using var tx = await c.BeginTransactionAsync();
     var id = Guid.NewGuid();
-    await using (var cmd = new NpgsqlCommand("INSERT INTO items(id,sku,name,quantity) VALUES(@id,@sku,@name,@qty)",c,tx))
+    await using (var cmd = new NpgsqlCommand("INSERT INTO items(id,sku,name,quantity,barcode,category,description,min_stock,unit_cost) VALUES(@id,@sku,@name,@qty,NULLIF(@barcode,''),@category,@description,@min,@cost)",c,tx))
     {
-        cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("sku",req.Sku.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());cmd.Parameters.AddWithValue("qty",req.Quantity);
+        cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("sku",req.Sku.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());cmd.Parameters.AddWithValue("qty",req.Quantity);cmd.Parameters.AddWithValue("barcode",(req.Barcode??"").Trim());cmd.Parameters.AddWithValue("category",req.Category??"");cmd.Parameters.AddWithValue("description",req.Description??"");cmd.Parameters.AddWithValue("min",req.MinStock);cmd.Parameters.AddWithValue("cost",(object?)req.UnitCost??DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
     }
     if (req.Quantity > 0)
@@ -149,6 +149,36 @@ app.MapGet("/api/movements", async (HttpContext ctx) =>
     while(await r.ReadAsync()) list.Add(new{id=r.GetInt64(0),sku=r.GetString(1),name=r.GetString(2),delta=r.GetInt32(3),before=r.GetInt32(4),after=r.GetInt32(5),time=r.GetDateTime(6),note=r.IsDBNull(7)?null:r.GetString(7)});
     return Results.Ok(list);
 });
+
+app.MapGet("/api/summary", async (HttpContext ctx) =>
+{
+    if (!await Authed(ctx)) return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT count(*),COALESCE(sum(quantity),0),count(*) FILTER(WHERE quantity<=min_stock),COALESCE(sum(quantity*unit_cost),0) FROM items",c);
+    await using var r=await cmd.ExecuteReaderAsync();await r.ReadAsync();
+    return Results.Ok(new{products=r.GetInt64(0),units=r.GetInt64(1),lowStock=r.GetInt64(2),value=r.GetDecimal(3)});
+});
+app.MapGet("/api/items/lookup/{code}", async (HttpContext ctx, string code) =>
+{
+    if (!await Authed(ctx)) return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT id,sku,name,quantity FROM items WHERE sku=@code OR barcode=@code LIMIT 1",c);
+    cmd.Parameters.AddWithValue("code",code);
+    await using var r=await cmd.ExecuteReaderAsync();
+    return await r.ReadAsync()?Results.Ok(new{id=r.GetGuid(0),sku=r.GetString(1),name=r.GetString(2),quantity=r.GetInt32(3)}):Results.NotFound();
+});
+app.MapPut("/api/items/{id:guid}", async (HttpContext ctx, Guid id, EditItem req) =>
+{
+    if (!await Authed(ctx)) return Results.Unauthorized();
+    if(string.IsNullOrWhiteSpace(req.Name)||string.IsNullOrWhiteSpace(req.Sku)||req.MinStock<0||req.UnitCost<0)return Results.BadRequest("Invalid item details");
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("UPDATE items SET sku=@sku,name=@name,barcode=NULLIF(@barcode,''),category=@category,description=@description,min_stock=@min,unit_cost=@cost,updated_at=now() WHERE id=@id",c);
+    cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("sku",req.Sku.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
+    cmd.Parameters.AddWithValue("barcode",(req.Barcode??"").Trim());cmd.Parameters.AddWithValue("category",(req.Category??"").Trim());cmd.Parameters.AddWithValue("description",(req.Description??"").Trim());
+    cmd.Parameters.AddWithValue("min",req.MinStock);cmd.Parameters.AddWithValue("cost",(object?)req.UnitCost??DBNull.Value);
+    return await cmd.ExecuteNonQueryAsync()==0?Results.NotFound():Results.Ok(new{updated=true});
+});
+
 await using (var c=await Connect())
 {
     await using var cmd=new NpgsqlCommand("""
@@ -156,6 +186,13 @@ await using (var c=await Connect())
     CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY,expires_at timestamptz NOT NULL);
     CREATE TABLE IF NOT EXISTS items(id uuid PRIMARY KEY,sku text NOT NULL UNIQUE,name text NOT NULL,quantity integer NOT NULL DEFAULT 0 CHECK(quantity>=0));
     CREATE TABLE IF NOT EXISTS movements(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,item_id uuid NOT NULL REFERENCES items(id),delta integer NOT NULL CHECK(delta<>0),before_qty integer NOT NULL,after_qty integer NOT NULL,note text,created_at timestamptz NOT NULL DEFAULT now());
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT '';
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '';
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS barcode text;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS min_stock integer NOT NULL DEFAULT 0;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS unit_cost numeric(12,2);
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+    CREATE UNIQUE INDEX IF NOT EXISTS items_barcode_idx ON items(barcode) WHERE barcode IS NOT NULL;
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS idempotency_key uuid;
     CREATE UNIQUE INDEX IF NOT EXISTS movements_idempotency_key_idx ON movements(idempotency_key) WHERE idempotency_key IS NOT NULL;
     """,c);
@@ -164,5 +201,6 @@ await using (var c=await Connect())
 app.Run();
 record Setup(string? SetupToken,string? Pin,string? ConfirmPin);
 record Login(string? Pin);
-record NewItem(string Sku,string Name,int Quantity);
+record NewItem(string Sku,string Name,int Quantity,string? Barcode="",string? Category="",string? Description="",int MinStock=0,decimal? UnitCost=null);
 record MovementRequest(int Delta,string? Note,Guid IdempotencyKey);
+record EditItem(string Sku,string Name,string? Barcode,string? Category,string? Description,int MinStock,decimal? UnitCost);
