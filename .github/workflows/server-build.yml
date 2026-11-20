@@ -1,0 +1,14 @@
+name: Server build
+on:
+  push:
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore server/Inventory.Api/Inventory.Api.csproj
+      - run: dotnet build server/Inventory.Api/Inventory.Api.csproj --no-restore --configuration Release
