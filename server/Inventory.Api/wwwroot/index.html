@@ -48,6 +48,67 @@ for(const dir of ['checkin','checkout'])$(dir+'Form').onsubmit=async e=>{e.preve
 document.addEventListener('click',e=>{const b=e.target.closest('[data-edit]');if(b){const item=items.find(x=>x.id===b.dataset.edit);if(item)openItem(item)}});
 $('newItemBtn').onclick=()=>openItem();$('logoutBtn').onclick=()=>logout();$('refreshBtn').onclick=load;
 $('exportBtn').onclick=()=>{const rows=[['ID','SKU','Name','Change','Before','After','Timestamp','Note'],...history.map(x=>[x.id,x.sku,x.name,x.delta,x.before,x.after,x.time,x.note||''])];const csv=rows.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='inventory-history.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
-$('cameraBtn').onclick=async()=>{if(!('BarcodeDetector' in window)){try{const {BrowserMultiFormatReader}=await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm');modal('Scan a barcode','<video id="scanVideo" class="camera" autoplay playsinline muted></video><p class="muted" style="margin-top:10px">Point your camera at a barcode.</p>');const reader=new BrowserMultiFormatReader();let controls=null,done=false;const stop=()=>{done=true;controls?.stop()};$('modalClose').onclick=()=>{stop();closeModal()};document.querySelector('.modal-backdrop').onclick=e=>{if(e.target.classList.contains('modal-backdrop')){stop();closeModal()}};controls=await reader.decodeFromVideoDevice(undefined,$('scanVideo'),(result)=>{if(!result||done)return;const code=result.getText();stop();closeModal();$('globalScan').value=code;$('globalScan').dispatchEvent(new Event('input'));$('globalScan').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))});if(done)controls.stop()}catch(err){closeModal();toast('Camera scanner unavailable: '+err.message,true)}return}let media;try{media=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});modal('Scan a barcode','<video id="scanVideo" class="camera" autoplay playsinline muted></video><p class="muted" style="margin-top:10px">Point the camera at a barcode.</p>');const video=$('scanVideo');video.srcObject=media;await video.play();const detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','qr_code','itf']});let active=true;const stop=()=>{active=false;media.getTracks().forEach(t=>t.stop())};const oldClose=$('modalClose').onclick;$('modalClose').onclick=()=>{stop();oldClose()};document.querySelector('.modal-backdrop').onclick=e=>{if(e.target.classList.contains('modal-backdrop')){stop();closeModal()}};const scan=async()=>{if(!active)return;try{const found=await detector.detect(video);if(found.length){const code=found[0].rawValue;stop();closeModal();$('globalScan').value=code;$('globalScan').dispatchEvent(new Event('input'));$('globalScan').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));return}}catch{}requestAnimationFrame(scan)};requestAnimationFrame(scan)}catch(err){if(media)media.getTracks().forEach(t=>t.stop());toast('Camera unavailable: '+err.message,true)}};
+async function scanResult(code){$('globalScan').value=code;const found=items.find(x=>x.sku.toLowerCase()===code.toLowerCase()||x.barcode?.toLowerCase()===code.toLowerCase());if(found){openMovement(found)}else{try{const remote=await api('items/lookup/'+encodeURIComponent(code));openMovement(items.find(x=>x.id===remote.id)||remote)}catch{openItem(null,code)}}}
+$('cameraBtn').onclick=async()=>{
+ let stopped=false,media=null,controls=null,frame=0;
+ const stop=()=>{stopped=true;cancelAnimationFrame(frame);controls?.stop();media?.getTracks().forEach(t=>t.stop())};
+ const close=()=>{stop();closeModal()};
+ const success=code=>{if(stopped||!code)return;close();toast('Scanned: '+code);scanResult(code)};
+ modal('Scan barcode','<video id="scanVideo" class="camera" autoplay playsinline muted></video><p id="scanStatus" class="muted" style="margin-top:10px">Position the barcode inside the camera view. Hold steady and make sure it is in focus.</p><p style="margin-top:12px"><button class="btn" id="scanManual">Enter barcode manually</button></p>');
+ $('modalClose').onclick=close;
+ document.querySelector('.modal-backdrop').onclick=e=>{if(e.target.classList.contains('modal-backdrop'))close()};
+ $('scanManual').onclick=()=>{close();$('globalScan').focus()};
+ const status=message=>{if(!stopped&&$('scanStatus'))$('scanStatus').textContent=message};
+ const video=$('scanVideo');
+ try{
+   media=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
+   if(stopped){stop();return}
+   video.srcObject=media;await video.play();
+   if('BarcodeDetector' in window){
+     try{
+       const desired=['ean_13','ean_8','upc_a','upc_e','code_128','code_39','qr_code','itf','codabar'];
+       const supported=typeof BarcodeDetector.getSupportedFormats==='function'?await BarcodeDetector.getSupportedFormats():desired;
+       const formats=desired.filter(x=>supported.includes(x));
+       if(formats.length){
+         const detector=new BarcodeDetector({formats});
+         let errors=0;
+         const detect=async()=>{
+           if(stopped)return;
+           try{
+             if(video.readyState>=2){
+               const results=await detector.detect(video);
+               if(results.length){success(results[0].rawValue);return}
+             }
+           }catch(e){
+             errors++;
+             if(errors>=3){status('Native scanner failed; switching to compatibility scanner…');await zxing();return}
+           }
+           if(!stopped)frame=requestAnimationFrame(detect);
+         };
+         status('Scanning with camera… Hold the barcode steady.');
+         frame=requestAnimationFrame(detect);
+         return;
+       }
+     }catch(e){status('Using compatibility scanner…')}
+   }
+   await zxing();
+ }catch(e){close();toast('Camera error: '+e.message,true)}
+ async function zxing(){
+   if(stopped)return;
+   status('Loading compatibility barcode scanner…');
+   try{
+     const {BrowserMultiFormatReader}=await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm');
+     if(stopped)return;
+     media?.getTracks().forEach(t=>t.stop());media=null;
+     video.srcObject=null;
+     const reader=new BrowserMultiFormatReader();
+     controls=await reader.decodeFromConstraints({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}},video,(result,error)=>{
+       if(result)success(result.getText());
+     });
+     if(stopped)controls.stop();
+     else status('Scanning… Move closer, improve lighting, or rotate the barcode.');
+   }catch(e){status('Compatibility scanner unavailable: '+e.message+'. You can enter the barcode manually.')}
+ }
+};
 window.addEventListener('online',load);setInterval(()=>{if(token&&!document.hidden)load()},20000);initialize();
 </script></body></html>
