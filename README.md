@@ -1,28 +1,37 @@
 # Inventory Manager
 
-Self-hosted barcode inventory management for Windows, web, and iOS.
+Self-hosted barcode inventory application for Windows browsers, mobile browsers, and a planned packaged Windows/iOS client.
 
-## Architecture
-- **Server:** ASP.NET Core 10 + PostgreSQL, hosted in a Proxmox Linux VM.
-- **Clients:** Shared React/TypeScript interface, Tauri 2 Windows packaging, Capacitor iOS packaging (planned).
-- **Network:** Existing Nginx proxy forwards `https://inv.mrmschf.xyz` to the VM's port 18424. No Caddy and no public database port.
-- **Authentication:** One shared passphrase/PIN, with no employee accounts.
-- **Connectivity:** Online-only; the server is authoritative for stock.
-- **Scanning:** USB HID keyboard scanner on Windows; iOS camera and compatible Bluetooth HID scanners.
-- **Theme:** Soft-charcoal dark UI, muted gray panels, green success accents.
+## Current web build
+- Responsive charcoal dark dashboard with Overview, Inventory, Check In, Check Out, History, Settings
+- Search by SKU, name, category, or barcode; keyboard-emulating USB/Bluetooth scanners
+- Item creation/editing, categories, descriptions, costs, minimum-stock alerts
+- Atomic check-in/out, nonnegative balances, transaction history, CSV export
+- One-time installation-token enrollment for a shared six-digit PIN
+- Persisted login sessions, PIN hashing, login rate limiting
+- Camera scanning through native BarcodeDetector where browser supports it
+- Online-only PostgreSQL backend; 20-second client refresh
+- Daily compressed PostgreSQL backup script and systemd timer
 
-## Status
-Phase 1: server foundation and architecture. This is **not yet a production-ready or tested Windows/iOS application**.
+## Install / update on Ubuntu 24.04 Proxmox LXC
+As root:
+```bash
+curl -fsSL https://raw.githubusercontent.com/moordyn/Inventory-Manager/main/deploy/install.sh -o /tmp/inventory-install.sh
+bash /tmp/inventory-install.sh
+```
+The installer retains the database volume and PIN and generates secrets only on first installation. Initial setup requires the one-time token printed by the installer.
 
-## Run on Linux
-See [deployment instructions](docs/deployment.md). Configure `POSTGRES_PASSWORD` and `INVENTORY_PIN` in a private `.env` file. Do not commit secrets.
+Nginx Proxy Manager forwards `https://inv.mrmschf.xyz` to `http://INVENTORY_LXC_IP:18424`. Only ports 80/443 should be forwarded to Nginx; never forward 18424, 81, or 5432 publicly.
 
-## Roadmap
-1. API, database, atomic stock transactions and tests.
-2. Windows-first scanner UI and Tauri package.
-3. Proxmox Linux installer, Nginx integration, backup/restore.
-4. Web UI, realtime updates.
-5. iOS camera scanner and Capacitor packaging.
-6. Security, concurrency and release validation.
+## Project layout
+- `server/Inventory.Api`: ASP.NET Core 10 API and web interface
+- `deploy`: Docker Compose, Ubuntu installer, PostgreSQL backup timer
+- `docs`: architecture and deployment notes
 
-No employee accounts, billing, purchase orders or offline sync in v1.
+## Remaining work
+The web app is an initial implementation, not a validated production release. GitHub Actions build verification, database migration tests, integration tests, robust concurrency/idempotency handling, restore tooling, camera-scanning fallback for iOS Safari, richer barcode formats, and packaged Tauri Windows / Capacitor iOS clients remain. Browser camera access requires HTTPS. A shared six-digit PIN is less secure than individual credentials; protect internet access with Cloudflare Access or another access control.
+
+## Backup
+Backups are saved to `/var/backups/inventory-manager` daily at 03:15 local time and retained for 14 days. Back up this directory outside the LXC and test restoring before relying on it.
+
+No employee accounts, invoicing, accounting or offline edits in v1.
