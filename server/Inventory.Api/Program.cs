@@ -130,7 +130,7 @@ app.MapPost("/api/items/{id:guid}/movements", async (HttpContext ctx, Guid id, M
     {
         update.Parameters.AddWithValue("qty",(int)after);update.Parameters.AddWithValue("id",id);await update.ExecuteNonQueryAsync();
     }
-    await using (var insert = new NpgsqlCommand("INSERT INTO movements(item_id,delta,before_qty,after_qty,note,idempotency_key) VALUES(@id,@delta,@before,@after,@note,@key) ON CONFLICT (idempotency_key) DO NOTHING",c,tx))
+    await using (var insert = new NpgsqlCommand("INSERT INTO movements(item_id,delta,before_qty,after_qty,note,idempotency_key) VALUES(@id,@delta,@before,@after,@note,@key) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING",c,tx))
     {
         insert.Parameters.AddWithValue("id",id);insert.Parameters.AddWithValue("delta",req.Delta);insert.Parameters.AddWithValue("before",before);insert.Parameters.AddWithValue("after",(int)after);
         insert.Parameters.AddWithValue("note",(object?)req.Note??DBNull.Value);insert.Parameters.AddWithValue("key",req.IdempotencyKey);
