@@ -1,9 +1,50 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/.."
-command -v docker >/dev/null || { echo "Docker is required. Install Docker Engine and Compose plugin first."; exit 1; }
-docker compose version >/dev/null || { echo "Docker Compose plugin is required."; exit 1; }
-test -f .env || { echo "Create .env from .env.example and set strong secrets."; exit 1; }
-echo "Starting Inventory Manager; do not expose publicly until security hardening is complete."
+if [[ $(id -u) -ne 0 ]]; then echo "Run as root"; exit 1; fi
+if [[ ! -f /etc/os-release ]]; then echo "Linux required"; exit 1; fi
+. /etc/os-release
+if [[ "$ID" != ubuntu || "$VERSION_ID" != "24.04" ]]; then echo "Designed for Ubuntu 24.04; found $PRETTY_NAME"; exit 1; fi
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y ca-certificates curl git openssl
+if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  cat > /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: noble
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+  apt-get update
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+fi
+systemctl enable --now docker
+APP=/opt/inventory-manager
+mkdir -p "$APP"
+if [[ -d "$APP/.git" ]]; then
+  cd "$APP"
+  if [[ -n "$(git status --porcelain)" ]]; then echo "Local changes detected; refusing to overwrite."; exit 1; fi
+  git pull --ff-only
+else
+  if [[ -n "$(ls -A "$APP")" ]]; then echo "$APP is not empty; refusing to overwrite."; exit 1; fi
+  git clone https://github.com/moordyn/Inventory-Manager.git "$APP"
+  cd "$APP"
+fi
+if [[ ! -f .env ]]; then
+  umask 077
+  printf 'POSTGRES_PASSWORD=%s\nSETUP_TOKEN=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > .env
+fi
+chmod 600 .env
 docker compose --env-file .env -f deploy/compose.yml up -d --build
-echo "Docker restart policies will restart containers after Docker starts on boot."
+IP=$(hostname -I | awk '{print $1}')
+echo ""
+echo "Inventory Manager started at http://${IP}:18424"
+echo "Open the site and create your 6-digit PIN."
+echo "For FIRST SETUP only, enter this setup token when prompted:"
+grep '^SETUP_TOKEN=' .env | cut -d= -f2-
+echo ""
+echo "Keep the setup token private. Do not expose the app to the internet until tested."
