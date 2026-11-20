@@ -6,9 +6,9 @@ services:
     environment:
       ConnectionStrings__Inventory: Host=db;Port=5432;Database=inventory;Username=inventory;Password=${POSTGRES_PASSWORD}
       INVENTORY_PIN: ${INVENTORY_PIN}
-      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_URLS: http://+ :18424
     ports:
-      - "8080:8080"
+      - "18424 :18424"
     depends_on:
       db:
         condition: service_healthy
