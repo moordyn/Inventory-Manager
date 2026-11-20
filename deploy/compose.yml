@@ -4,11 +4,11 @@ services:
       context: ..
       dockerfile: server/Inventory.Api/Dockerfile
     environment:
-      ConnectionStrings__Inventory: Host=db;Port=5432;Database=inventory;Username=inventory;Password=${POSTGRES_PASSWORD}
-      INVENTORY_PIN: ${INVENTORY_PIN}
-      ASPNETCORE_URLS: http://+ :18424
+      ConnectionStrings__Inventory: "Host=db;Port=5432;Database=inventory;Username=inventory;Password=${POSTGRES_PASSWORD}"
+      SETUP_TOKEN: "${SETUP_TOKEN}"
+      ASPNETCORE_URLS: "http://+:8080"
     ports:
-      - "18424 :18424"
+      - "18424:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -18,7 +18,7 @@ services:
     environment:
       POSTGRES_DB: inventory
       POSTGRES_USER: inventory
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
     volumes:
       - inventory_data:/var/lib/postgresql/data
     healthcheck:
