@@ -40,6 +40,10 @@ if [[ ! -f .env ]]; then
 fi
 chmod 600 .env
 docker compose --env-file .env -f deploy/compose.yml up -d --build
+install -m 0644 deploy/inventory-backup.service /etc/systemd/system/inventory-backup.service
+install -m 0644 deploy/inventory-backup.timer /etc/systemd/system/inventory-backup.timer
+systemctl daemon-reload
+systemctl enable --now inventory-backup.timer
 IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "Inventory Manager started at http://${IP}:18424"
