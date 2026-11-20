@@ -1,0 +1,7 @@
+[Unit]
+Description=Inventory Manager daily PostgreSQL backup
+Wants=docker.service
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/inventory-manager/deploy/backup.sh
