@@ -29,6 +29,10 @@ The application provides a per-store reorder list, CSV exports, audit logging an
 - Per-user password hashes use salted PBKDF2-SHA256; one-time activation and reset tokens are stored as SHA256 hashes and expire after 24 hours and 30 minutes respectively. Password reset revokes old sessions; browser inactivity is limited to 15 minutes with matching server expiry and no visible countdown. The old PIN and ID-only sessions are invalidated on initial migration.
 - Login/session and OAuth/token fields are protected within PostgreSQL to the extent specified by the current implementation. Protect the host's private `.env`, including `GOOGLE_TOKEN_KEY`, alongside database backups.
 
+### Employee display names
+
+Display names are independent from immutable-to-staff employee IDs. Store admins may rename themselves and non-admin employees with access to their selected store; only global admins may rename other admins. The server checks target roles and membership, updates the employee name, and writes an audit entry. Display-name changes do not rewrite historical employee IDs or require a new session.
+
 ### Employee identity changes
 
 Employees may change their own email only after confirming the new mailbox with a single-use, 30-minute link; existing sessions are revoked on success. Employee ID changes are server-authorized for **global administrators only** (including self-renaming), with a database transaction updating dependent references and revoking renamed sessions. The original setup owner's ID starts as `OWNER` but is persisted under `settings.owner_employee_id`, which remains authoritative after a rename. The original recovery administrator cannot be demoted, even after changing the display/login ID. All other users' IDs are immutable from their own account settings.
