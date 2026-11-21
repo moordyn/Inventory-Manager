@@ -3,8 +3,15 @@
 These tests are required before calling a deployment production-ready. Automated CI catches syntax, CSS balance and missing DOM references, but cannot prove camera performance or mobile layout.
 
 ## Sign-in and navigation
-- [ ] On iPhone Safari, Android Chrome, and desktop Chrome/Edge, employee ID sign-in opens Home without flashing back to login.
-- [ ] Global admin PIN sign-in opens Home; the Administration tab appears only for authorized users.
+- [ ] First-time employee entering an unused employee ID is guided to the activation form; matching email and password are required twice.
+- [ ] Password policy enforces 8+ characters with uppercase, lowercase, digit and symbol on client and API.
+- [ ] Verification email contains a one-time 24-hour link; it activates exactly once and cannot be reused.
+- [ ] Forgot password sends a 30-minute link to verified email, gives identical responses for unknown IDs and invalidates old sessions.
+- [ ] Global administrator can configure the sending Gmail account with their own password and verify the OWNER bootstrap email under Settings.
+- [ ] No auto-signout countdown is displayed; real user interaction keeps sessions alive while background inventory polling does not; sign out after 15 minutes idle.
+
+- [ ] On iPhone Safari, Android Chrome, and desktop Chrome/Edge, employee ID + individual password sign-in opens Home without flashing back to login.
+- [ ] OWNER initial setup uses the installation token with matching email/password fields, then password sign-in opens Home; the Administration tab appears only for authorized users.
 - [ ] Mobile bottom navigation contains Home, Items, In, Out, History and role-based Admin without clipping at 320, 375, 390 and 430 CSS pixels.
 - [ ] The mobile account header has a working Settings and Sign out button.
 - [ ] Inactivity countdown reaches sign out only after 30 seconds without interaction; valid activity resets it.
@@ -71,7 +78,7 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] Validate schema migrations against a copy of production PostgreSQL.
 - [ ] Take and restore a backup to confirm the database and encryption key can be recovered.
 - [ ] Confirm private environment variables are not included in Git or sent to browsers.
-- [ ] Fix or mitigate employee-ID-only authorization before treating store-admin actions as securely authenticated.
+- [ ] Limit first-claim activation of unused employee IDs to trusted staff, and verify no employee/store-admin can sign in without a password.
 - [ ] Verify Gmail authorization and automatic alert delivery in the intended Google OAuth publishing mode.
 - [ ] Check accessibility with keyboard and screen reader, and test on real iOS Safari hardware.
 - [ ] Monitor logs and browser console for 4xx/5xx failures during a smoke-test session.
