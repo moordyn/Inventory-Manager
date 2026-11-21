@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 ## Unreleased — changes on `main` after v1.1.0
 
 - Installer accepts `--domain example.com` / `--domain=https://example.com`; repairs missing or empty `PUBLIC_ORIGIN` while preserving existing secrets.
+- Role-based employee display-name changes: store admins can rename themselves and non-admin employees assigned to their current store; global admins can rename anyone. Employee IDs are unaffected.
 - Employees may request a verified change to their own email (current password + matching new address fields + one-use 30-minute link); confirmation revokes sessions.
 - Global administrators may rename employee IDs (including their own original `OWNER` account); related records are migrated atomically and sessions revoked. Owner recovery identity follows its new ID.
 - Documentation reorganized into task-focused deployment, accounts, operations, networking examples and QA references. The old comprehensive-guide path is retained as an index.
