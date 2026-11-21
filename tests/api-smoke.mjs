@@ -378,7 +378,9 @@ const pickupZero=(await call('repairs',{token:admin,method:'POST',body:{
  device:'Zero balance device',repairType:'Paid upfront',quotedTotal:50,
  paidUpfront:50,idempotencyKey:randomUUID()
 },expect:201})).body.id;
-await call('repairs/'+pickupZero+'/status',{token:admin,method:'PUT',body:{status:'completed'},expect:200});
+await call('repairs/'+pickupZero+'/status',{token:admin,method:'PUT',body:{status:'ready'},expect:200});
+assert.ok((await call('repairs',{token:admin})).body.some(r=>r.id===pickupZero&&r.status==='ready'&&!r.pickedUpAt),
+ 'Ready for Pickup repair must be eligible for final payment/pickup without going through Completed');
 assert.equal((await call('repairs/'+pickupZero+'/pickup',{token:admin,method:'POST',body:{
  idempotencyKey:randomUUID()
 },expect:200})).body.recordedPayment,0);
