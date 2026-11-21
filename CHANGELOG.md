@@ -4,6 +4,14 @@ All notable changes to Inventory Manager are recorded here.
 
 This project uses [Semantic Versioning](https://semver.org/). Repository tags and published GitHub Releases identify immutable source snapshots; deploying a tagged version does **not** automatically update a running server.
 
+## Unreleased — next feature release
+
+- Added five cohesive dark palettes: Evergreen (mint), Deep Purple, Midnight Ocean, Copper Ember, and Rose Noir.
+- Employees choose their own persistent dashboard palette from **Settings → Appearance**, maintained by server-side account preferences and applied across devices.
+- Global administrators select the public sign-in/activation theme, independently of individual employee preferences; changes are audited and protected by a role-checked API.
+- Added color-matched ZAGG wordmarks and favicons for every theme, coordinated UI surfaces and accent/focus colors, updated theme documentation and automated coverage.
+- Full behavior and palette reference: [Themes](docs/themes.md). These commits are **not** included in the v1.2.0 release tag.
+
 ## [1.2.0] — Account administration, verified email changes and deploy improvements
 
 - Installer accepts `--domain example.com` / `--domain=https://example.com`; repairs missing or empty `PUBLIC_ORIGIN` while preserving existing secrets.
