@@ -21,7 +21,7 @@ Replace `inventory.example.com` with a hostname **you control** (root domain or 
 
 - Inventory isolated by store; SKU/barcode search, categories, descriptions, cost, minimum stock, per-store CSV export.
 - Check-in/out with transaction history, notes, atomic stock updates and idempotency protection.
-- **Repair Queue:** oldest-first device repair tickets, employee attribution, quotes/upfront payments and balances, automatic assignment to the check-in employee, status/history tracking, camera/SKU parts scanning, atomic inventory deductions, and auditable returns. [Repair Queue guide](docs/repairs.md).
+- **Repair Queue:** oldest-first device repair tickets, employee attribution, quotes/upfront deposits, final paid/picked-up settlement and balances, automatic assignment to the check-in employee, status/history tracking, camera/SKU parts scanning, atomic inventory deductions, and auditable returns. [Repair Queue guide](docs/repairs.md).
 - Camera barcode scanning with native BarcodeDetector where supported and ZXing fallback; USB/Bluetooth keyboard-style scanners.
 - Reorder lists/CSV, low-stock thresholds, inventory metrics, and quick stock adjustments.
 - Store access assignment, store/global administrative roles, auditable management operations; store admins can rename themselves and ordinary staff in their store, global admins can rename anyone.
