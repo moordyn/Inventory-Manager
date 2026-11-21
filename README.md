@@ -9,6 +9,11 @@ Self-hosted barcode inventory application for Windows browsers, mobile browsers,
 - Search by SKU, name, category, or barcode; keyboard-emulating USB/Bluetooth scanners
 - Item creation/editing, categories, descriptions, costs, minimum-stock alerts
 - Atomic check-in/out, nonnegative balances, transaction history, CSV export
+- Full store inventory CSV export (all active products, not just the current table), with formula-injection-safe text fields
+- Clickable low-stock dashboard metric with a reorder list, suggested order quantities and a reorder CSV export
+- In-place product-specific transaction history (latest 200 stock movements per product)
+- Quick stock adjustment presets (+1, +5, −1, −5), still requiring Save and a reason for checkout
+- Administrator activity history (latest 200 actions): access grants/revocations, permissions, store changes, product deletion, email settings and global Gmail connection changes
 - One-time installation-token enrollment for a shared six-digit PIN
 - Persisted login sessions, PIN hashing, failure-only login lockouts (5 failed attempts per 5 minutes; success clears the counter)
 - Camera scanning through native BarcodeDetector where browser supports it
@@ -33,8 +38,21 @@ Nginx Proxy Manager forwards `https://inv.mrmschf.xyz` to `http://INVENTORY_LXC_
 ## Visual and camera quality assurance
 See [docs/ui-qa-checklist.md](docs/ui-qa-checklist.md) for the full mobile, desktop, accessibility, barcode, administrator and production acceptance checklist. The UI and scanner static regression checks run in GitHub Actions, but real-device camera speed and production readiness must be validated on the deployed server.
 
-## Remaining work
-The web app is an initial implementation, not a validated production release. GitHub Actions build verification, database migration tests, integration tests, robust concurrency/idempotency handling, restore tooling, camera-scanning fallback for iOS Safari, richer barcode formats, and packaged Tauri Windows / Capacitor iOS clients remain. Browser camera access requires HTTPS. A shared six-digit PIN is less secure than individual credentials; protect internet access with Cloudflare Access or another access control.
+## Reporting, reorder and administrator activity
+
+- **Inventory → Export inventory CSV:** downloads all active products from the currently selected location, regardless of how many rows have loaded into the dashboard. Exports include SKU, product name, barcode, category, stock, minimum level, unit cost and description.
+- **Overview → Low stock alerts** (select the count), or **Inventory → Reorder list:** shows every product at or below its configured minimum. The **Order Qty** column gives the quantity necessary to bring stock **one unit above** the minimum. Export the list as CSV.
+- **Inventory → Edit → View history:** expands a per-product transaction list while leaving unsaved form fields intact. Shows up to the latest 200 movements with before/after quantities, employee, date, and reason.
+- **Item stock dialog → +1/+5/−1/−5:** picks the action and quantity. Click **Save transaction** to commit it; checkout still requires a reason and prevents negative balances.
+- **Administration → Administrator activity history:** global admins see changes across stores; store admins see only changes associated with their current store. Historical actions from before this feature was deployed cannot be reconstructed.
+
+Reports are server-generated and store-scoped; the API never trusts a client-provided store ID for report access. The administrator event log excludes OAuth credentials and recipient address lists. Activity is recorded in the same database transaction as most administrative actions.
+
+## Testing and release status
+
+GitHub Actions now includes a .NET Release build, frontend/static regression checks, and a PostgreSQL-backed API smoke-test suite in `tests/api-smoke.mjs`. The smoke tests cover CSV export, formula escaping, low-stock thresholds, product history, transaction idempotency, cross-store authorization, activity scoping and deletion.
+
+This repository is **not yet certified for production deployment**. Verify the CI run on your latest commit and test the live deployment, real mobile camera scanning, database backup/restore, and administrator authorization. Employee ID-only store-admin login is a weak authentication boundary; require stronger authentication before using it to protect sensitive or high-privilege operations. Automated testing is not a substitute for staging verification.
 
 ## Backup
 Backups are saved to `/var/backups/inventory-manager` daily at 03:15 local time and retained for 14 days. Back up this directory outside the LXC and test restoring before relying on it.
