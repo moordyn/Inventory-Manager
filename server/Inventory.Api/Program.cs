@@ -749,6 +749,67 @@ async Task SendMail(string[] recipients,string subject,string body){
     using var smtp=new SmtpClient("smtp.gmail.com",587){EnableSsl=true,UseDefaultCredentials=false,Credentials=new NetworkCredential(user,password),Timeout=15000};
     await smtp.SendMailAsync(message);
 }
+// Authentication email is independent of low-stock recipients: it goes only to the employee.
+// An integration-test outbox is enabled ONLY under the explicit IntegrationTest environment.
+async Task<bool> AccountMailReady(){
+    if(MailConfigured())return true;
+    if(!GoogleReady())return false;
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM global_google_sender WHERE id=1)",c);
+    return (bool)(await cmd.ExecuteScalarAsync()??false);
+}
+async Task SendAccountEmail(string email,string subject,string body){
+    if(app.Environment.IsEnvironment("IntegrationTest")){
+        var outbox=Environment.GetEnvironmentVariable("AUTH_EMAIL_TEST_OUTBOX");
+        if(!string.IsNullOrWhiteSpace(outbox)){
+            await System.IO.File.AppendAllTextAsync(outbox,JsonSerializer.Serialize(new{email,subject,body})+"\n");
+            return;
+        }
+    }
+    if(GoogleReady()){
+        await using var c=await Connect();
+        await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM global_google_sender WHERE id=1)",c);
+        if((bool)(await cmd.ExecuteScalarAsync()??false)){
+            await SendGmail(new[]{email},subject,body);
+            return;
+        }
+    }
+    if(MailConfigured()){await SendMail(new[]{email},subject,body);return;}
+    throw new InvalidOperationException("No company Gmail or SMTP sender has been configured.");
+}
+async Task<string> CreateAccountEmailToken(NpgsqlConnection c,NpgsqlTransaction tx,string employeeId,string email,string purpose,string? pendingHash,int validMinutes){
+    // At most one unexpired activation at a time: a second person cannot silently replace
+    // its claimed mailbox. Within 60 seconds, even same-address resends are throttled.
+    await using(var existing=new NpgsqlCommand("""
+        SELECT email,created_at FROM auth_email_tokens
+        WHERE employee_id=@id AND purpose=@purpose AND expires_at>now() FOR UPDATE
+        """,c,tx)){
+        existing.Parameters.AddWithValue("id",employeeId);existing.Parameters.AddWithValue("purpose",purpose);
+        await using var r=await existing.ExecuteReaderAsync();
+        if(await r.ReadAsync()){
+            if(!string.Equals(r.GetString(0),email,StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("An activation request for this employee ID is already pending. Contact your administrator if this was not you.");
+            if(r.GetDateTime(1)>DateTime.UtcNow.AddSeconds(-60))
+                throw new InvalidOperationException("An email was just sent. Please wait a minute before requesting another.");
+        }
+    }
+    var raw=NewAuthCode();
+    await using var put=new NpgsqlCommand("""
+        INSERT INTO auth_email_tokens(employee_id,purpose,token_hash,email,pending_password_hash,created_at,expires_at)
+        VALUES(@id,@purpose,@hash,@email,@pending,now(),now()+(@minutes * interval '1 minute'))
+        ON CONFLICT(employee_id,purpose) DO UPDATE SET
+        token_hash=excluded.token_hash,email=excluded.email,
+        pending_password_hash=excluded.pending_password_hash,created_at=now(),expires_at=excluded.expires_at
+        """,c,tx);
+    put.Parameters.AddWithValue("id",employeeId);
+    put.Parameters.AddWithValue("purpose",purpose);
+    put.Parameters.AddWithValue("hash",Hash(raw));
+    put.Parameters.AddWithValue("email",email);
+    put.Parameters.Add("pending",NpgsqlTypes.NpgsqlDbType.Text).Value=(object?)pendingHash??DBNull.Value;
+    put.Parameters.AddWithValue("minutes",validMinutes);
+    await put.ExecuteNonQueryAsync();
+    return raw;
+}
 async Task QueueLowStock(NpgsqlConnection c,NpgsqlTransaction tx,Guid itemId,string store){
     await using var cmd=new NpgsqlCommand("""
     INSERT INTO low_stock_state(item_id,store_id,is_low)
