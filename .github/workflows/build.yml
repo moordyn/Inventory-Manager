@@ -32,6 +32,7 @@ jobs:
           node-version: '22'
       - name: Verify frontend JavaScript
         run: |
+          node --check server/Inventory.Api/wwwroot/assets/login-fluid.js
           node - <<'NODE'
           const fs = require('node:fs');
           const html = fs.readFileSync('server/Inventory.Api/wwwroot/index.html','utf8');
@@ -90,10 +91,16 @@ jobs:
               "if(now-last<50)return"]) {
             if (!html.includes(marker)) throw new Error('Signed-in ambient background missing: '+marker);
           }
+          const fluidSource=fs.readFileSync('server/Inventory.Api/wwwroot/assets/login-fluid.js','utf8');
           for (const marker of ['id="loginAurora"', 'class="login-aurora"',
-              "const loginAurora=(()=>{", "canvas.parentElement.addEventListener('pointermove'",
-              "matchMedia('(prefers-reduced-motion: reduce)')", "loginAurora.stop()", "loginAurora.start()"]) {
-            if (!html.includes(marker)) throw new Error('Login aurora visual or lifecycle missing: '+marker);
+              'src="/assets/login-fluid.js"', 'window.createLoginFluid',
+              'loginAurora.stop()', 'loginAurora.start()']) {
+            if (!html.includes(marker)) throw new Error('Login fluid view/lifecycle missing: '+marker);
+          }
+          for (const marker of ['webgl2', 'EXT_color_buffer_float', 'advect:', 'vorticity:',
+              'divergence:', 'pressure:', 'subtract:', 'display:', 'pointermove',
+              "prefers-reduced-motion: reduce", 'visibilitychange', 'baseColor']) {
+            if (!fluidSource.includes(marker)) throw new Error('Login fluid simulation missing: '+marker);
           }
           for (const marker of ['id="myThemeChoices"','id="loginThemeChoices"',
               'data-theme-choice=', 'function setTheme(theme)', 'themeMarkup(active)']) {
