@@ -366,13 +366,12 @@ async Task<JsonDocument> TokenRequest(Dictionary<string,string> data){
     if(!response.IsSuccessStatusCode)throw new InvalidOperationException("Google token exchange failed: "+(int)response.StatusCode);
     return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 }
-async Task SendGmail(string store,string[] recipients,string subject,string body){
+async Task SendGmail(string[] recipients,string subject,string body){
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT email,refresh_token FROM google_store_accounts WHERE store_id=@store",c);
-    cmd.Parameters.AddWithValue("store",store);
+    await using var cmd=new NpgsqlCommand("SELECT email,refresh_token FROM global_google_sender WHERE id=1",c);
     string sender,refresh;
     await using(var reader=await cmd.ExecuteReaderAsync()){
-        if(!await reader.ReadAsync())throw new InvalidOperationException("No Google account connected");
+        if(!await reader.ReadAsync())throw new InvalidOperationException("Global Google sending account has not been connected");
         sender=reader.GetString(0);refresh=DecryptToken(reader.GetString(1));
     }
     using var tokens=await TokenRequest(new(){
@@ -463,9 +462,19 @@ app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthI
     return Results.Ok(new{configured=true,clientId});
 }).RequireRateLimiting("sensitive");
 
+// The Gmail sender is a single global account managed only by PIN-authenticated global admins.
+app.MapGet("/api/admin/google-sender",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!who.Value.globalAdmin)return Results.Forbid();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT email,connected_at FROM global_google_sender WHERE id=1",c);
+    await using var r=await cmd.ExecuteReaderAsync();
+    if(!await r.ReadAsync())return Results.Ok(new{connected=false,email=(string?)null,connectedAt=(DateTime?)null,googleConfigured=GoogleReady(),smtpConfigured=MailConfigured()});
+    return Results.Ok(new{connected=true,email=r.GetString(0),connectedAt=(DateTime?)r.GetDateTime(1),googleConfigured=GoogleReady(),smtpConfigured=MailConfigured()});
+});
 app.MapPost("/api/google/connect",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    if(!who.Value.globalAdmin)return Results.Forbid();
     if(!GoogleReady())return Results.BadRequest("Google OAuth credentials are not configured on the server.");
     var state=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     var verifier=Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+','-').Replace('/','_');
@@ -484,15 +493,15 @@ app.MapGet("/api/google/callback",async (string? code,string? state,string? erro
     try{
         await using var c=await Connect();
         await using var tx=await c.BeginTransactionAsync();
-        await using var cmd=new NpgsqlCommand("DELETE FROM google_oauth_states WHERE state_hash=@state AND expires_at>now() RETURNING store_id,employee_id,verifier",c,tx);
+        await using var cmd=new NpgsqlCommand("DELETE FROM google_oauth_states WHERE state_hash=@state AND expires_at>now() RETURNING employee_id,verifier",c,tx);
         cmd.Parameters.AddWithValue("state",Hash(state));
-        string store,employee,verifier;
+        string employee,verifier;
         await using(var reader=await cmd.ExecuteReaderAsync()){
             if(!await reader.ReadAsync())return Results.Redirect(back+"expired");
-            store=reader.GetString(0);employee=reader.GetString(1);verifier=reader.GetString(2);
+            employee=reader.GetString(0);verifier=reader.GetString(1);
         }
-        await using var role=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@employee AND active AND global_admin) OR EXISTS(SELECT 1 FROM employee_store_access a JOIN employees e ON e.id=a.employee_id WHERE a.employee_id=@employee AND a.store_id=@store AND a.role='store_admin' AND e.active)",c,tx);
-        role.Parameters.AddWithValue("employee",employee);role.Parameters.AddWithValue("store",store);
+        await using var role=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@employee AND active AND global_admin)",c,tx);
+        role.Parameters.AddWithValue("employee",employee);
         if(!(bool)(await role.ExecuteScalarAsync()??false))return Results.Redirect(back+"unauthorized");
         using var token=await TokenRequest(new(){
             ["client_id"]=googleCredentials.ClientId,["client_secret"]=googleCredentials.ClientSecret,["code"]=code,
@@ -508,20 +517,21 @@ app.MapGet("/api/google/callback",async (string? code,string? state,string? erro
         using var profile=JsonDocument.Parse(await profileResponse.Content.ReadAsStringAsync());
         var email=profile.RootElement.GetProperty("email").GetString()??"";
         if(!ValidEmail(email)||!profile.RootElement.GetProperty("email_verified").GetBoolean())return Results.Redirect(back+"unverified");
-        await using var save=new NpgsqlCommand("INSERT INTO google_store_accounts(store_id,email,refresh_token,connected_by) VALUES(@store,@email,@token,@employee) ON CONFLICT(store_id) DO UPDATE SET email=excluded.email,refresh_token=excluded.refresh_token,connected_by=excluded.connected_by,connected_at=now()",c,tx);
-        save.Parameters.AddWithValue("store",store);save.Parameters.AddWithValue("email",email);save.Parameters.AddWithValue("token",EncryptToken(refresh));save.Parameters.AddWithValue("employee",employee);
+        await using var save=new NpgsqlCommand("INSERT INTO global_google_sender(id,email,refresh_token,connected_by) VALUES(1,@email,@token,@employee) ON CONFLICT(id) DO UPDATE SET email=excluded.email,refresh_token=excluded.refresh_token,connected_by=excluded.connected_by,connected_at=now()",c,tx);
+        save.Parameters.AddWithValue("email",email);save.Parameters.AddWithValue("token",EncryptToken(refresh));save.Parameters.AddWithValue("employee",employee);
         await save.ExecuteNonQueryAsync();await tx.CommitAsync();
         return Results.Redirect(back+"connected");
-    }catch(Exception ex){app.Logger.LogError(ex,"Google OAuth callback failed");return Results.Redirect(back+"failed");}
+    }catch(Exception ex){app.Logger.LogError(ex,"Global Google OAuth callback failed");return Results.Redirect(back+"failed");}
 });
 app.MapPost("/api/google/disconnect",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    if(!who.Value.globalAdmin)return Results.Forbid();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("DELETE FROM google_store_accounts WHERE store_id=@store",c);
-    cmd.Parameters.AddWithValue("store",who.Value.store);await cmd.ExecuteNonQueryAsync();
+    await using var cmd=new NpgsqlCommand("DELETE FROM global_google_sender WHERE id=1",c);
+    await cmd.ExecuteNonQueryAsync();
     return Results.Ok(new{disconnected=true});
 });
+
 app.MapGet("/api/alerts/config",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
