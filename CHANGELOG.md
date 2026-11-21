@@ -6,10 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 ## Unreleased — next feature release
 
-- Added five cohesive dark palettes: Evergreen (mint), Deep Purple, Midnight Ocean, Copper Ember, and Rose Noir.
+- Added ten cohesive palettes: Evergreen (mint), Deep Purple, Midnight Ocean, Copper Ember, Rose Noir, Arctic Slate, Forest Night, Champagne Gold, Crimson Night, and Glacier Light (**light mode**).
 - Employees choose their own persistent dashboard palette from **Settings → Appearance**, maintained by server-side account preferences and applied across devices.
 - Global administrators select the public sign-in/activation theme, independently of individual employee preferences; changes are audited and protected by a role-checked API.
-- Added color-matched ZAGG wordmarks and favicons for every theme, coordinated UI surfaces and accent/focus colors, updated theme documentation and automated coverage.
+- Added color-matched ZAGG wordmarks and favicons for every theme, coordinated UI surfaces and accent/focus colors, a light browser color scheme with dedicated contrast overrides, updated theme documentation and automated coverage.
 - Full behavior and palette reference: [Themes](docs/themes.md). These commits are **not** included in the v1.2.0 release tag.
 
 ## [1.2.0] — Account administration, verified email changes and deploy improvements
