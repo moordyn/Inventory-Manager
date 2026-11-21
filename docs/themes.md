@@ -19,6 +19,14 @@ Inventory Manager provides **ten themes (nine dark, one light)**, each with its 
 
 All ten use the same information architecture and responsive page layout. The selector shows three sample color swatches and highlights the selected palette. The logo geometry and text stay consistent across brands while the accent and supporting lettering are recolored; the matching favicon changes too.
 
+## Interactive sign-in aurora
+
+The sign-in, first-time setup, and password-recovery screen now includes a **theme-matched animated cloud backdrop**. Five soft ambient light fields drift in the background; moving or dragging the mouse (and touch movement on compatible devices) leaves a short, luminous colored wake that grows and dissipates. The colors are derived from the currently selected **public login theme**, so changing the global login palette also changes the background illumination. **Glacier Light** uses a lower-opacity effect suitable for a pale backdrop.
+
+The animation is a decorative, pointer-transparent HTML canvas located **behind** the login card: it does not capture clicks, block keyboard navigation, or overlay form controls. Rendering is limited to approximately 30 frames per second with a capped device-pixel ratio. The animation pauses when the signed-in application replaces the login view or the browser tab is hidden. Users who enable **Reduce Motion** see a static soft theme-color glow instead. No background asset, WebGL, server interaction, or external dependency is required.
+
+QA: check desktop mouse movement over the background, pointer movement over the login card, touch interaction, sign-out/relogin lifecycle, tab visibility, reduced-motion preferences, all ten themes, and low-performance mobile devices. Verify that forms, browser autofill, and submit buttons remain usable.
+
 ## Personal dashboard theme
 
 Every signed-in employee—including ordinary employees and all admins—can open **Settings → Appearance** and select any of the ten themes. The selection is stored in the server database as `employees.theme`, not merely browser local storage, so it remains available after logout and on other devices. The API validates the theme against the ten allowed IDs, and an authenticated employee may update **only their own** preference:
