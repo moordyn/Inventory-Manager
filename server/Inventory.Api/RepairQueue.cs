@@ -32,17 +32,6 @@ static class RepairQueueEndpoints
         cmd.Parameters.AddWithValue("key",key.ToString("N"));
         await cmd.ExecuteNonQueryAsync();
     }
-    static async Task<bool> AvailableEmployee(NpgsqlConnection c,NpgsqlTransaction tx,string store,string employee)
-    {
-        await using var cmd=new NpgsqlCommand("""
-            SELECT EXISTS(SELECT 1 FROM employees e
-              JOIN employee_store_access access ON access.employee_id=e.id AND access.store_id=@store
-              WHERE e.id=@employee AND e.active)
-            """,c,tx);
-        cmd.Parameters.AddWithValue("store",store);
-        cmd.Parameters.AddWithValue("employee",employee);
-        return (bool)(await cmd.ExecuteScalarAsync()??false);
-    }
     public static void Map(
         WebApplication app,
         Func<Task<NpgsqlConnection>> connect,
@@ -83,20 +72,6 @@ static class RepairQueueEndpoints
                     partsUsed=reader.GetInt64(13),customerName=reader.GetString(14),serialNumber=reader.GetString(15)
                 });
             }
-            return Results.Ok(rows);
-        });
-        app.MapGet("/api/repairs/technicians",async (HttpContext ctx)=>{
-            var who=await identity(ctx);if(who is null)return Results.Unauthorized();
-            await using var c=await connect();
-            await using var cmd=new NpgsqlCommand("""
-                SELECT e.id,e.name FROM employees e JOIN employee_store_access access
-                ON access.employee_id=e.id AND access.store_id=@store
-                WHERE e.active ORDER BY e.name,e.id
-                """,c);
-            cmd.Parameters.AddWithValue("store",who.Value.store);
-            await using var reader=await cmd.ExecuteReaderAsync();
-            var rows=new List<object>();
-            while(await reader.ReadAsync())rows.Add(new{id=reader.GetString(0),name=reader.GetString(1)});
             return Results.Ok(rows);
         });
         app.MapGet("/api/repairs/{id:long}",async (HttpContext ctx,long id)=>{
@@ -183,8 +158,6 @@ static class RepairQueueEndpoints
                !ValidMoney(req.QuotedTotal)||!ValidMoney(req.PaidUpfront)||req.PaidUpfront>req.QuotedTotal||
                req.IdempotencyKey==Guid.Empty)
                 return Results.BadRequest("Invalid device, repair type, customer fields, quote or upfront payment.");
-            var assignee=req.AssignedTo?.Trim();
-            if(assignee is {Length:0})assignee=null;
             await using var c=await connect();
             await using var tx=await c.BeginTransactionAsync();
             await LockKey(c,(NpgsqlTransaction)tx,req.IdempotencyKey);
@@ -203,8 +176,6 @@ static class RepairQueueEndpoints
                                :Results.Conflict("Idempotency key is already used for another repair.");
                 }
             }
-            if(assignee is not null && !await AvailableEmployee(c,(NpgsqlTransaction)tx,who.Value.store,assignee))
-                return Results.BadRequest("Assigned employee must have access to this store.");
             await using var cmd=new NpgsqlCommand("""
                 INSERT INTO repair_tickets(store_id,created_by,device,repair_type,customer_name,customer_contact,
                      serial_number,notes,quoted_total,paid_upfront,assigned_to,request_key)
@@ -222,7 +193,7 @@ static class RepairQueueEndpoints
             cmd.Parameters.AddWithValue("quote",req.QuotedTotal);
             cmd.Parameters.AddWithValue("paid",req.PaidUpfront);
             cmd.Parameters.AddWithValue("key",req.IdempotencyKey);
-            cmd.Parameters.Add("assigned",NpgsqlDbType.Text).Value=(object?)assignee??DBNull.Value;
+            cmd.Parameters.AddWithValue("assigned",who.Value.employee);
             var id=(long)(await cmd.ExecuteScalarAsync()??throw new InvalidOperationException("Repair creation failed"));
             await Event(c,(NpgsqlTransaction)tx,id,who.Value.store,who.Value.employee,
                 "checked_in",$"Repair checked in. Quoted {req.QuotedTotal:C}, paid upfront {req.PaidUpfront:C}.");
@@ -254,21 +225,6 @@ static class RepairQueueEndpoints
                 "status",$"{old} → {req.Status}");
             await tx.CommitAsync();
             return Results.Ok(new{updated=true,status=req.Status});
-        });
-        app.MapPut("/api/repairs/{id:long}/assign",async (HttpContext ctx,long id,RepairAssignRequest req)=>{
-            var who=await identity(ctx);if(who is null)return Results.Unauthorized();
-            var employee=req.EmployeeId?.Trim();if(employee is {Length:0})employee=null;
-            await using var c=await connect();await using var tx=await c.BeginTransactionAsync();
-            if(employee is not null&&!await AvailableEmployee(c,(NpgsqlTransaction)tx,who.Value.store,employee))
-                return Results.BadRequest("Technician must be an active employee at this store.");
-            await using(var cmd=new NpgsqlCommand("UPDATE repair_tickets SET assigned_to=@employee,updated_at=now() WHERE id=@id AND store_id=@store",c,tx)){
-                cmd.Parameters.Add("employee",NpgsqlDbType.Text).Value=(object?)employee??DBNull.Value;
-                cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("store",who.Value.store);
-                if(await cmd.ExecuteNonQueryAsync()==0)return Results.NotFound();
-            }
-            await Event(c,(NpgsqlTransaction)tx,id,who.Value.store,who.Value.employee,"assigned",
-                employee is null?"Unassigned technician":"Assigned to "+employee);
-            await tx.CommitAsync();return Results.Ok(new{assignedTo=employee});
         });
         app.MapPost("/api/repairs/{id:long}/payments",async (HttpContext ctx,long id,RepairPaymentRequest req)=>{
             var who=await identity(ctx);if(who is null)return Results.Unauthorized();
@@ -485,9 +441,8 @@ static class RepairQueueEndpoints
 }
 
 record RepairCreateRequest(string? Device,string? RepairType,decimal QuotedTotal,decimal PaidUpfront,
-    string? CustomerName,string? CustomerContact,string? SerialNumber,string? Notes,string? AssignedTo,Guid IdempotencyKey);
+    string? CustomerName,string? CustomerContact,string? SerialNumber,string? Notes,Guid IdempotencyKey);
 record RepairStatusRequest(string? Status);
-record RepairAssignRequest(string? EmployeeId);
 record RepairPaymentRequest(decimal Amount,Guid IdempotencyKey);
 record RepairPartRequest(Guid? ItemId,string? Code,int Quantity,Guid IdempotencyKey);
 record RepairReturnRequest(Guid IdempotencyKey);
