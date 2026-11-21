@@ -455,6 +455,16 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
 <section class="card" style="margin-top:18px">
  <div class="admin-head"><div><h2>Team & permissions</h2><p>Manage employees, store access and administrator roles</p></div></div>
  <div id="employeesList"></div>
+ <form id="renameEmployeeForm" class="hidden admin-form" style="margin-top:14px;max-width:560px">
+  <h3 id="renameEmployeeTitle">Rename employee</h3>
+  <p class="muted">Changes the employee's display name only. Employee ID and history remain unchanged.</p>
+  <label for="renameEmployeeName">Employee display name</label>
+  <input id="renameEmployeeName" required maxlength="100" autocomplete="off">
+  <div class="admin-tools" style="margin-top:12px">
+   <button class="btn primary" type="submit" id="renameEmployeeSubmit">Save name</button>
+   <button class="btn" type="button" id="cancelRenameEmployee">Cancel</button>
+  </div>
+ </form>
  <form id="permissionsForm" class="hidden"><div class="admin-head"><h3 id="permissionsTitle">Edit permissions</h3><button class="btn ghost" type="button" id="closePermissionsBtn">Close</button></div>
   <div id="employeeIdEditWrap" class="hidden"><label for="employeeIdEdit">Employee ID — global admins only</label><input id="employeeIdEdit" maxlength="24" pattern="[A-Za-z0-9_-]{2,24}"><button type="button" class="btn" id="saveEmployeeIdBtn" style="margin-top:8px">Change employee ID</button><p class="muted">Only global admins can rename IDs, including their own. Renaming signs the account out on all devices.</p></div>
   <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="globalAdminToggle" style="width:auto"> Global Administrator · all locations</label>
@@ -1228,7 +1238,7 @@ $('sendTestAlert').onclick=async ()=>{
 const auditActionNames={
  'store.created':'Store created','store.updated':'Store updated','employee.created':'Employee created',
  'access.granted':'Store access granted','access.revoked':'Store access removed',
- 'employee.permissions':'Permissions updated','employee.id_changed':'Employee ID changed','account.email_changed':'Account email changed','alerts.updated':'Email alerts updated',
+ 'employee.permissions':'Permissions updated','employee.id_changed':'Employee ID changed','employee.name_changed':'Employee renamed','account.email_changed':'Account email changed','alerts.updated':'Email alerts updated',
  'product.deleted':'Product deleted','movement.note_updated':'Checkout note updated','oauth.configured':'Google OAuth configuration updated',
  'gmail.connected':'Global Gmail connected','gmail.disconnected':'Global Gmail disconnected'
 };
@@ -1270,7 +1280,11 @@ async function loadAdmin(){
   $('storeForm').classList.toggle('hidden',!identity.isGlobalAdmin);
   $('storesList').innerHTML='<table><thead><tr><th>Store ID</th><th>Location Name</th><th>Status</th><th>Manage</th></tr></thead><tbody>'+stores.map(x=>'<tr><td data-label="Store ID"><strong>'+esc(x.id)+'</strong></td><td data-label="Location">'+esc(x.name)+'</td><td data-label="Status">'+(x.active===false?'Inactive':'Active')+'</td><td data-label="Manage">'+(identity.isGlobalAdmin?'<button type="button" class="btn" data-edit-store="'+esc(x.id)+'">Edit</button>':'—')+'</td></tr>').join('')+'</tbody></table>';
   $('accessList').innerHTML=access.length?access.map(x=>'<div class="employee-row"><span>'+esc(employees.find(e=>e.id===x.employeeId)?.name||x.employeeId)+'</span><span class="muted">'+esc(stores.find(st=>st.id===x.storeId)?.name||x.storeId)+(x.role==='store_admin'?' · Admin':'')+'</span></div>').join(''):'<p class="muted">No assignments found.</p>';
-  $('employeesList').innerHTML=employees.length?employees.map(x=>'<div class="employee-row"><div><strong>'+esc(x.name)+'</strong><div class="muted" style="font-size:12px;margin:3px 0">ID '+esc(x.id)+' · '+esc(stores.find(st=>st.id===x.storeId)?.name||x.storeId)+'</div><span class="role-pill '+(x.globalAdmin?'':'neutral')+'">'+(x.globalAdmin?'Global administrator':access.some(a=>a.employeeId===x.id&&a.role==='store_admin')?'Store administrator':'Employee')+'</span></div>'+(identity.isGlobalAdmin?'<button type="button" class="btn" data-permission-employee="'+esc(x.id)+'">Manage access</button>':'')+'</div>').join(''):'<div class="empty">No employees yet. Add your first employee below.</div>';
+  $('employeesList').innerHTML=employees.length?employees.map(x=>{
+   const targetAdmin=x.globalAdmin||access.some(a=>a.employeeId===x.id&&a.role==='store_admin');
+   const canRename=identity.isGlobalAdmin||x.id===identity.employeeId||(!targetAdmin&&access.some(a=>a.employeeId===x.id&&a.storeId===identity.storeId));
+   return '<div class="employee-row"><div><strong>'+esc(x.name)+'</strong><div class="muted" style="font-size:12px;margin:3px 0">ID '+esc(x.id)+' · '+esc(stores.find(st=>st.id===x.storeId)?.name||x.storeId)+'</div><span class="role-pill '+(x.globalAdmin?'':'neutral')+'">'+(x.globalAdmin?'Global administrator':targetAdmin?'Store administrator':'Employee')+'</span></div><div class="admin-tools">'+(canRename?'<button type="button" class="btn" data-rename-employee="'+esc(x.id)+'">Rename</button>':'')+(identity.isGlobalAdmin?'<button type="button" class="btn" data-permission-employee="'+esc(x.id)+'">Manage access</button>':'')+'</div></div>';
+  }).join(''):'<div class="empty">No employees yet. Add your first employee below.</div>';
   if(!identity.isGlobalAdmin){$('permissionsForm').classList.add('hidden');selectedPermissionEmployee=null;}
   if(selectedPermissionEmployee&&identity.isGlobalAdmin)showEmployeePermissions(selectedPermissionEmployee);
  }catch(e){toast(e.message,true)}
@@ -1289,7 +1303,41 @@ function showEmployeePermissions(id){
  $('adminLocations').innerHTML=adminStores.map(x=>'<label style="display:flex;align-items:center;gap:10px"><input type="checkbox" class="admin-store-checkbox" value="'+esc(x.id)+'" style="width:auto" '+(selected.includes(x.id)?'checked':'')+'> '+esc(x.name)+'</label>').join('');
  $('adminLocations').classList.toggle('hidden',!$('storeAdminToggle').checked);
 }
-$('employeesList').onclick=e=>{const b=e.target.closest('[data-permission-employee]');if(b){showEmployeePermissions(b.dataset.permissionEmployee);$('permissionsForm').scrollIntoView({behavior:'smooth',block:'nearest'})}};
+let selectedRenameEmployee=null;
+$('employeesList').onclick=e=>{
+ const rename=e.target.closest('[data-rename-employee]');
+ if(rename){
+  const employee=adminEmployees.find(x=>x.id===rename.dataset.renameEmployee);
+  if(!employee)return;
+  selectedRenameEmployee=employee.id;
+  $('renameEmployeeTitle').textContent='Rename '+employee.name+' ('+employee.id+')';
+  $('renameEmployeeName').value=employee.name;
+  $('renameEmployeeForm').classList.remove('hidden');
+  $('renameEmployeeForm').scrollIntoView({behavior:'smooth',block:'nearest'});
+  $('renameEmployeeName').focus();return;
+ }
+ const permissions=e.target.closest('[data-permission-employee]');
+ if(permissions){showEmployeePermissions(permissions.dataset.permissionEmployee);$('permissionsForm').scrollIntoView({behavior:'smooth',block:'nearest'});}
+};
+$('cancelRenameEmployee').onclick=()=>{$('renameEmployeeForm').classList.add('hidden');selectedRenameEmployee=null;};
+$('renameEmployeeForm').onsubmit=async e=>{
+ e.preventDefault();
+ if(!selectedRenameEmployee)return;
+ const id=selectedRenameEmployee,name=$('renameEmployeeName').value.trim();
+ if(!name||name.length>100){toast('Enter a name between 1 and 100 characters.',true);return;}
+ const button=$('renameEmployeeSubmit');button.disabled=true;
+ try{
+  await api('admin/employees/'+encodeURIComponent(id)+'/name','PUT',{name});
+  if(identity.employeeId===id){
+   identity.employeeName=name;
+   $('signedInEmployee').textContent=name;
+   $('mobileEmployeeName').textContent=name;
+  }
+  $('renameEmployeeForm').classList.add('hidden');selectedRenameEmployee=null;
+  toast('Employee name updated');await loadAdmin();
+ }catch(err){toast('Unable to rename employee: '+err.message,true)}
+ finally{button.disabled=false}
+};
 $('saveEmployeeIdBtn').onclick=async()=>{
  if(!identity?.isGlobalAdmin||!selectedPermissionEmployee)return;
  const previous=selectedPermissionEmployee,newId=$('employeeIdEdit').value.trim();
