@@ -1124,6 +1124,34 @@ await using (var c=await Connect())
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS idempotency_key uuid;
     CREATE UNIQUE INDEX IF NOT EXISTS movements_idempotency_key_idx ON movements(idempotency_key) WHERE idempotency_key IS NOT NULL;
     CREATE INDEX IF NOT EXISTS movements_store_item_recent_idx ON movements(store_id,item_id,id DESC);
+
+    -- v1.1.0: employee email/password identity and one-time verification/reset links.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS email text;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash text;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_updated_at timestamptz;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS bootstrap_provisional boolean NOT NULL DEFAULT false;
+    CREATE UNIQUE INDEX IF NOT EXISTS employees_email_unique_idx ON employees(lower(email)) WHERE email IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS auth_email_tokens(
+        employee_id text NOT NULL,
+        purpose text NOT NULL CHECK (purpose IN ('activate','reset','verify')),
+        token_hash text NOT NULL UNIQUE,
+        email text NOT NULL,
+        pending_password_hash text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        expires_at timestamptz NOT NULL,
+        PRIMARY KEY(employee_id,purpose)
+    );
+    CREATE INDEX IF NOT EXISTS auth_email_tokens_expiry_idx ON auth_email_tokens(expires_at);
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen_at timestamptz NOT NULL DEFAULT now();
+    -- Every legacy PIN/ID-only bearer session is invalidated exactly once during migration.
+    DO $auth_upgrade$
+    BEGIN
+      IF NOT EXISTS(SELECT 1 FROM settings WHERE key='password_auth_v2') THEN
+        DELETE FROM sessions;
+        INSERT INTO settings(key,value) VALUES ('password_auth_v2','enabled');
+      END IF;
+    END $auth_upgrade$;
     """,c);
     await cmd.ExecuteNonQueryAsync();
 }
