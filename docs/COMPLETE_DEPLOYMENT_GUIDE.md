@@ -562,17 +562,17 @@ The server requests:
 
 The <code>gmail.send</code> scope permits sending messages (not general inbox browsing). Google consent policies and verification requirements depend on audience, account ownership and publishing status.
 
-**The configured origin/callback are hardcoded in the current API.** Changing the domain again requires changing the code/import validation and Google Cloud client entries, then redeploying. A DNS redirect by itself is not sufficient.
+**This is a bring-your-own-Google-Cloud integration.** The application reads `PUBLIC_ORIGIN` from the private server `.env` (passed into the API via Docker Compose). Google redirects to `PUBLIC_ORIGIN + /api/google/callback`. The OAuth Web client **must be created in your own Google Cloud project** and the uploaded JSON must contain **your** origin and callback. A change of domain needs an intentional `PUBLIC_ORIGIN` edit/restart, DNS/proxy/SSL updates and Google OAuth client updates; it does **not** require editing/recompiling the application code.
 
 ### 9.2 Create or choose a Google Cloud project
 
-Open https://console.cloud.google.com/ and select the intended Google Cloud project. **Do not create another project if you already have an OAuth client you want to preserve.**
+Open https://console.cloud.google.com/ with **your own Google account**, and create a project under your business or select a project you legitimately control. **You do not need — and must not rely upon — the original developer's Google Cloud project, OAuth Client ID, client secret, consent screen, or sending mailbox.** For an established installation, keep using the existing authorized client's credentials where possible, but new customers should create their own.
 
 - Confirm the appropriate business/account administrator owns the project and will retain access during personnel changes.
 - Search for and enable the **Gmail API** in **APIs & Services → Library** if not already enabled.
 - In the new Google Auth Platform interface, review **Branding**, **Audience**, **Clients**, and **Data Access**. Exact navigation labels can evolve.
 - Set application name and support contact appropriately. Use branding/domain assets only with permission to use the associated trademark.
-- Add <code>inventory.example.com</code> as an **Authorized domain** where Google requests it; Google may require domain ownership verification for production/verification.
+- Add your **registrable/root domain** (for the example `inventory.example.com`, this is normally `example.com`) under **Authorized domains** where Google requires it; production/verification may require proof of ownership. This is **not** the same field as an OAuth client's full JavaScript origin.
 - Select a suitable audience for your intended Gmail account(s). A company-managed Google Workspace internal app differs from an External app. Google's newer Personal mode may also be available to eligible new projects; it has restrictions and cannot simply be toggled on in an existing External project.
 
 **Publishing/refresh-token caution:** For **External** projects in **Testing**, when requesting <code>gmail.send</code> and offline access, Google's refresh tokens normally expire after **seven days**. If alerts stop working after approximately a week, inspect the project's Audience/publishing status and token logs; repeatedly reconnecting is not a substitute for an appropriate production configuration. Publishing and sensitive-scope verification may apply; do not claim the project is verified merely because Google allowed a test login.
@@ -581,17 +581,19 @@ Open https://console.cloud.google.com/ and select the intended Google Cloud proj
 
 Go to https://console.cloud.google.com/auth/clients.
 
-Create a **Web application** client if you do not already have one. Otherwise **edit the existing client** to preserve the existing client ID/secret and connected sender where possible.
+Create an OAuth **Web application** client in **your own Google Cloud project**. If you already operate a client that you legitimately control and intend to reuse, edit that client instead. Never import somebody else's OAuth client JSON.
 
 Enter exactly:
 
-| Google OAuth client field | Required value |
+| Google OAuth client field | Example if your PUBLIC_ORIGIN is `https://inventory.example.com` |
 | --- | --- |
 | Application type | **Web application** |
-| Authorized JavaScript origin | **https://inventory.example.com** |
-| Authorized redirect URI | **https://inventory.example.com/api/google/callback** |
+| Authorized JavaScript origin | **`https://inventory.example.com`** — replace with the exact URL in your `.env` |
+| Authorized redirect URI | **`https://inventory.example.com/api/google/callback`** — `PUBLIC_ORIGIN + /api/google/callback` |
 
-**Exact match matters:** HTTPS, hostname, callback path and any trailing slash. This callback ends with <code>/callback</code> and **has no trailing slash**. Do not enter the LAN HTTP URL, old <code>legacy.example.invalid</code>, <code>www</code>, or <code>/api/google/connect</code> as the primary callback.
+**Root-domain alternative:** `PUBLIC_ORIGIN=https://example.com` means JavaScript origin `https://example.com` and redirect URI `https://example.com/api/google/callback`. For any other host, calculate it the same way. **Do not put the example hostname into your Google project unless it is actually your authorized hostname.**
+
+**Exact match matters:** HTTPS, hostname, callback path and any trailing slash. This callback ends with <code>/callback</code> and **has no trailing slash**. Do not enter the LAN HTTP address, another business's hostname, an unintended `www` variant, a trailing `/`, or the `/api/google/connect` endpoint. Use your chosen `PUBLIC_ORIGIN` precisely.
 
 Click **Save** in Google Cloud. Download the Web OAuth client **JSON** **after** saving, so its <code>redirect_uris</code> and <code>javascript_origins</code> arrays reflect the new configuration. The dashboard import validates both values.
 
@@ -607,7 +609,7 @@ Click **Save** in Google Cloud. Download the Web OAuth client **JSON** **after**
 
 ### 9.5 Import OAuth client JSON through the Inventory Manager dashboard — preferred
 
-First verify the application itself works at **https://inventory.example.com**.
+First verify the application itself works at **your own HTTPS domain**, configured by `PUBLIC_ORIGIN` (for example only, `https://inventory.example.com`).
 
 1. Sign in with **Administrator access** using the **global administrator** account (<code>OWNER</code> by default) and the six-digit PIN.
 2. Open **Administration**.
@@ -632,7 +634,7 @@ cd /opt/inventory-manager
 sudo bash deploy/configure-google.sh /root/client_secret.json
 ~~~
 
-The helper validates the Web client JSON, requires <code>https://inventory.example.com/api/google/callback</code> in redirect URIs, and writes <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> into the host's private <code>.env</code>. It rebuilds/restarts the API.
+The helper reads **the existing installation's `PUBLIC_ORIGIN` from `.env`**, requires that exact JavaScript origin **and** `PUBLIC_ORIGIN + /api/google/callback` in the Google Web client JSON, then writes `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to `.env`. It rebuilds/restarts the API. It does **not** need credentials from the maintainer's Google project.
 
 Only run this when you deliberately choose **server-side configuration** rather than the dashboard. A dashboard-imported OAuth config stored in PostgreSQL may take precedence over <code>.env</code> credentials when the API starts. **Delete the temporary JSON file securely after you verify setup**, and keep the authoritative password-manager copy. The optional helper does **not** authorize a Gmail sender on its own.
 
@@ -640,11 +642,11 @@ Only run this when you deliberately choose **server-side configuration** rather 
 
 When the global admin clicks **Connect global Gmail**, the API issues a Google authorization URL using a 10-minute server-side state and PKCE challenge, then Google returns to:
 
-**https://inventory.example.com/api/google/callback**
+**`PUBLIC_ORIGIN + /api/google/callback`** (example: `https://inventory.example.com/api/google/callback`).
 
-The API exchanges the code for OAuth tokens, verifies a Google email identity, encrypts/stores the **refresh token** in PostgreSQL, and redirects back to the site's Administration flow. The browser should land back at the new domain; if it lands on the old domain, the server code you deployed is outdated.
+The API exchanges the code for OAuth tokens, verifies a Google email identity, encrypts/stores the **refresh token** in PostgreSQL, and redirects back to the site's Administration flow. The browser should return to **your** domain. If it lands on an unexpected hostname, inspect your server `PUBLIC_ORIGIN`, any old client JSON and your actual deployed build.
 
-**Common callback failures:**
+**Common callback failures (Google's redirect URI must match exactly):**
 - <code>redirect_uri_mismatch</code>: wrong Google Client / hostname / missing exact callback or old deployed code.
 - Google sign-in canceled: retry and deliberately consent.
 - “Not configured”: OAuth client absent or encryption key invalid.
