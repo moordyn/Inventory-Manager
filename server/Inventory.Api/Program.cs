@@ -26,8 +26,33 @@ var setupToken = Environment.GetEnvironmentVariable("SETUP_TOKEN") ?? throw new 
 if (setupToken.Length < 32 || setupToken.StartsWith("replace-")) throw new Exception("Invalid setup token");
 static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 static bool Equal(string a, string b) => CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
-static bool PinValid(string? p) => p is not null && Regex.IsMatch(p, @"^[0-9]{6}$");
-static string PinHash(string pin, byte[] salt) => Convert.ToHexString(Rfc2898DeriveBytes.Pbkdf2(pin, salt, 600_000, HashAlgorithmName.SHA256, 32));
+// Password and email verification replace legacy shared PIN / employee-ID-only authentication.
+// Password hashes include a random per-user salt and use PBKDF2-HMAC-SHA256 (600k iterations).
+static bool PasswordValid(string? p)=>p is {Length: >=8 and <=128}
+    &&p.Any(char.IsUpper)&&p.Any(char.IsLower)&&p.Any(char.IsDigit)
+    &&p.Any(c=>!char.IsLetterOrDigit(c))&&!p.Any(char.IsControl);
+static string PasswordHash(string password){
+    var salt=RandomNumberGenerator.GetBytes(24);
+    return "pbkdf2-sha256:600000:"+Convert.ToHexString(salt)+":"+
+        Convert.ToHexString(Rfc2898DeriveBytes.Pbkdf2(password,salt,600_000,HashAlgorithmName.SHA256,32));
+}
+static bool PasswordMatches(string? password,string? stored){
+    if(string.IsNullOrEmpty(password)||string.IsNullOrEmpty(stored))return false;
+    try{
+        var parts=stored.Split(':');
+        if(parts.Length!=4||parts[0]!="pbkdf2-sha256"||parts[1]!="600000")return false;
+        var expected=Convert.FromHexString(parts[3]);
+        var actual=Rfc2898DeriveBytes.Pbkdf2(password,Convert.FromHexString(parts[2]),600_000,HashAlgorithmName.SHA256,32);
+        return CryptographicOperations.FixedTimeEquals(actual,expected);
+    }catch(Exception ex)when(ex is FormatException or ArgumentException){return false;}
+}
+static bool EmailPairValid(string? email,string? confirmEmail)
+    =>!string.IsNullOrWhiteSpace(email)&&email.Length<=254
+       &&string.Equals(email.Trim(),confirmEmail?.Trim(),StringComparison.OrdinalIgnoreCase)
+       &&System.Net.Mail.MailAddress.TryCreate(email.Trim(),out var address)
+       &&string.Equals(address.Address,email.Trim(),StringComparison.OrdinalIgnoreCase);
+static string NewAuthCode()=>Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+const int SessionIdleMinutes=15;
 async Task<NpgsqlConnection> Connect() { var c = new NpgsqlConnection(cs); await c.OpenAsync(); return c; }
 static string CsvField(string? raw){
     var value=raw??"";
