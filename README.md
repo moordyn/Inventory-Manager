@@ -23,24 +23,51 @@ Self-hosted barcode inventory application for Windows browsers, mobile browsers,
 - Online-only PostgreSQL backend; 20-second client refresh
 - Daily compressed PostgreSQL backup script and systemd timer
 
-## Quick install / update on Ubuntu 24.04 Proxmox LXC
+## Install on Ubuntu 24.04 — bring your own domain
 
-**For a fresh install, read [the complete deployment guide](docs/COMPLETE_DEPLOYMENT_GUIDE.md) first.** The installer alone does not configure the domain, firewall, NPM, HTTPS or Google Cloud.
-As root:
-```bash
+**Every installer uses their own website and Google Cloud credentials. No part of a new deployment requires the original developer's domain or Google OAuth client.**
+
+For a fresh install, choose your own canonical HTTPS hostname (such as `https://inventory.example.com` **as an example only**) and read the **[complete, provider-neutral deployment guide](docs/COMPLETE_DEPLOYMENT_GUIDE.md)**.
+
+The installer **asks for `PUBLIC_ORIGIN` on first setup** (or receives it from the environment for an unattended install). From your own Ubuntu app server:
+
+~~~bash
 curl -fsSL https://raw.githubusercontent.com/moordyn/Inventory-Manager/main/deploy/install.sh -o /tmp/inventory-install.sh
-bash /tmp/inventory-install.sh
-```
-The installer retains the database volume and PIN and generates secrets only on first installation. Initial setup requires the one-time token printed by the installer.
+less /tmp/inventory-install.sh
+sudo bash /tmp/inventory-install.sh
+~~~
 
-Nginx Proxy Manager forwards `https://zagginventorymanager.com` to `http://INVENTORY_LXC_IP:18424`. Only ports 80/443 should be forwarded to Nginx; never forward 18424, 81, or 5432 publicly.
+For a noninteractive deployment, supply **your own real HTTPS domain**:
 
-### Public domain migration (Cloudflare + OPNsense)
+~~~bash
+# EXAMPLE ONLY — replace the hostname with the domain you actually control:
+sudo PUBLIC_ORIGIN=https://inventory.example.com bash /tmp/inventory-install.sh
+~~~
 
-The application now uses **`https://zagginventorymanager.com`** as its canonical public URL. The previous `inv.mrmschf.xyz` hostname is retired and should no longer be used for Google OAuth. Configure Cloudflare DNS for the **apex/root domain** (`@`) and let the OPNsense DDNS Cloudflare account keep its A record current. Point an Nginx Proxy Manager proxy host for `zagginventorymanager.com` to the existing Inventory Manager server at port **18424**, enable an HTTPS certificate, and use Cloudflare **Full (strict)** with a valid origin certificate. Do not expose port 18424 directly to the internet.
+The installer configures Docker, PostgreSQL, local secrets and daily backups, **not** your DNS provider, HTTPS proxy, NAT, SSL certificate, or Google Cloud. Set up those components according to your own infrastructure. Cloudflare DNS, OPNsense DDNS, Proxmox, and Nginx Proxy Manager are documented examples; none is an exclusive requirement.
 
-In Google Cloud, authorize **`https://zagginventorymanager.com`** as a JavaScript origin and **`https://zagginventorymanager.com/api/google/callback`** as a redirect URI. Add `zagginventorymanager.com` to Authorized domains where required. The same existing Google OAuth Client ID and Secret remain valid; you **do not need a new API key or OAuth client** just for the hostname change. Previously encrypted Gmail refresh tokens remain in PostgreSQL and are not modified by deployment. If reimporting the Google OAuth client JSON, download a fresh JSON file after saving the new origin and redirect URI in Google Cloud.
+An HTTPS proxy typically forwards `https://YOUR_REAL_HOSTNAME` to `http://INVENTORY_LXC_IP:18424`. **Never expose database 5432 or the app's internal host port 18424 directly to the Internet.** Employee-ID-only authentication remains a security limitation; add stronger protection before unrestricted public access.
 
+For an existing installation, normal updates are:
+
+~~~bash
+cd /opt/inventory-manager
+sudo bash deploy/install.sh
+~~~
+
+The existing database and private `.env` are preserved, including `PUBLIC_ORIGIN` and the `GOOGLE_TOKEN_KEY` needed to decrypt connected Gmail credentials. Read the guide before changing the domain or rotating encryption keys.
+
+### Bring your own Google OAuth and Gmail sender
+
+A company that wants Gmail low-stock notifications creates a **Google Cloud project and Web application OAuth client under its own account**. The application uses:
+
+- **Authorized JavaScript origin** = the exact `PUBLIC_ORIGIN` from the private host `.env`.
+- **Authorized redirect URI** = `PUBLIC_ORIGIN + /api/google/callback`.
+- **Scope** = `https://www.googleapis.com/auth/gmail.send`.
+
+For example **only**, `PUBLIC_ORIGIN=https://inventory.example.com` implies a redirect of `https://inventory.example.com/api/google/callback`. This is **not** a real shared OAuth callback for customers.
+
+Enable Gmail API, configure Google Auth Platform Branding/Audience/Data Access and the appropriate sending account, save the OAuth client, download its JSON, and import that JSON using **Administration → Google OAuth configuration** as global administrator. Then click **Connect global Gmail** and configure recipients per store. See the [complete setup instructions](docs/COMPLETE_DEPLOYMENT_GUIDE.md#9-google-cloud-oauth-and-gmail-api) for consent screen, test users, secure secrets and troubleshooting.
 
 ## Project layout
 - `server/Inventory.Api`: ASP.NET Core 10 API and web interface
@@ -92,7 +119,7 @@ Alerts are queued when a product is at or below its minimum stock threshold and 
 4. In that same global section, click **Connect global Gmail** and authorize the one Gmail account to send notifications for all stores.
 5. Store administrators can now open **Administration → Low-stock email alerts**, type their own recipient addresses, enable alerts, save, and click **Send test email**. They have no access to the sending Gmail connection.
 
-The Gmail authorization uses `https://www.googleapis.com/auth/gmail.send` and the OAuth Web application's redirect `https://zagginventorymanager.com/api/google/callback`. In Google Cloud, enable Gmail API, use an **External** audience if connecting ordinary Gmail accounts, and include any required test users. Google's **Testing** publishing status can result in refresh tokens expiring after seven days; production use may require verification.
+Gmail authorization requests `https://www.googleapis.com/auth/gmail.send` and uses the installing business's OAuth Web client, with the redirect derived from `PUBLIC_ORIGIN` as `PUBLIC_ORIGIN + /api/google/callback`. In Google Cloud, enable Gmail API, use an **External** audience if connecting ordinary Gmail accounts, and include any required test users. Google's **Testing** publishing status can result in refresh tokens expiring after seven days; production use may require verification.
 
 **Upgrade note:** Prior per-store Google sender authorizations are retained as legacy data but are **no longer used** for outgoing mail. A global administrator must connect the global sender once after upgrading. Existing per-store recipient addresses and alert settings are preserved.
 
