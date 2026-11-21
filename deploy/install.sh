@@ -4,6 +4,27 @@ if [[ $(id -u) -ne 0 ]]; then echo "Run as root"; exit 1; fi
 if [[ ! -f /etc/os-release ]]; then echo "Linux required"; exit 1; fi
 . /etc/os-release
 if [[ "$ID" != ubuntu || "$VERSION_ID" != "24.04" ]]; then echo "Designed for Ubuntu 24.04; found $PRETTY_NAME"; exit 1; fi
+# Accept a bare domain or HTTPS origin, with optional --domain= syntax.
+DOMAIN_ARG=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --domain)
+      if [[ $# -lt 2 || -z "$2" ]]; then echo "Missing value for --domain" >&2; exit 2; fi
+      DOMAIN_ARG="$2"; shift 2 ;;
+    --domain=*)
+      DOMAIN_ARG="${1#--domain=}"; shift ;;
+    -h|--help)
+      echo "Usage: sudo bash deploy/install.sh [--domain example.com]"
+      echo "Accepts example.com or https://example.com; updates PUBLIC_ORIGIN in .env."
+      exit 0 ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2 ;;
+  esac
+done
+if [[ -n "$DOMAIN_ARG" ]]; then
+  if [[ "$DOMAIN_ARG" != https://* ]]; then DOMAIN_ARG="https://$DOMAIN_ARG"; fi
+fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y ca-certificates curl git openssl python3
@@ -34,19 +55,21 @@ else
   git clone https://github.com/moordyn/Inventory-Manager.git "$APP"
   cd "$APP"
 fi
-# A new installation must supply its own public domain; this is used for OAuth's exact HTTPS callback.
-# Run non-interactively with PUBLIC_ORIGIN=https://inventory.example.com in the environment.
-if [[ ! -f .env ]]; then
-  ORIGIN="${PUBLIC_ORIGIN:-}"
-  if [[ -z "$ORIGIN" && -t 0 ]]; then
-    read -r -p "Public HTTPS origin for this installation (e.g. https://inventory.example.com): " ORIGIN
-  fi
-  if [[ -z "$ORIGIN" ]]; then
-    echo "A new installation needs PUBLIC_ORIGIN=https://your-domain.example (without trailing slash)." >&2
-    echo "For a non-interactive install, run: sudo PUBLIC_ORIGIN=https://inventory.example.com bash deploy/install.sh" >&2
-    exit 1
-  fi
-  python3 - "$ORIGIN" <<'PY'
+# The --domain argument takes precedence, followed by PUBLIC_ORIGIN from the environment.
+# Existing PUBLIC_ORIGIN is preserved when no override is supplied.
+ORIGIN="${DOMAIN_ARG:-${PUBLIC_ORIGIN:-}}"
+if [[ -z "$ORIGIN" && -f .env ]]; then
+  ORIGIN="$(sed -n 's/^PUBLIC_ORIGIN=//p' .env | tail -n 1)"
+fi
+if [[ -z "$ORIGIN" && -t 0 ]]; then
+  read -r -p "Public HTTPS origin (e.g. https://inventory.example.com): " ORIGIN
+fi
+if [[ -z "$ORIGIN" ]]; then
+  echo "Missing domain. Run: sudo bash deploy/install.sh --domain inventory.example.com" >&2
+  exit 1
+fi
+if [[ "$ORIGIN" != https://* ]]; then ORIGIN="https://$ORIGIN"; fi
+python3 - "$ORIGIN" <<'PY'
 import re
 import sys
 from urllib.parse import urlsplit
@@ -56,21 +79,47 @@ try:
     if not (url.scheme == "https" and url.hostname and "." in url.hostname
             and url.netloc == url.hostname and not url.username and not url.password
             and not url.path and not url.query and not url.fragment
+            and len(url.hostname) <= 253
             and re.fullmatch(r"[a-z0-9.-]+", url.hostname)
             and all(label and len(label) <= 63 and not label.startswith("-") and not label.endswith("-") for label in url.hostname.split("."))):
         raise ValueError()
 except ValueError:
-    raise SystemExit("Invalid PUBLIC_ORIGIN: use https://inventory.example.com (no port, path or trailing slash)")
+    raise SystemExit("Invalid domain: use example.com or https://example.com (no port, path or trailing slash)")
 PY
+if [[ ! -f .env ]]; then
   umask 077
   printf 'POSTGRES_PASSWORD=%s\nSETUP_TOKEN=%s\nPUBLIC_ORIGIN=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" "$ORIGIN" > .env
-  echo "Configured public origin: $ORIGIN"
-elif ! grep -q '^PUBLIC_ORIGIN=' .env; then
-  # Preserve the previously deployed hardcoded OAuth domain for existing installations.
-  # Operators moving to another domain must edit PUBLIC_ORIGIN in .env intentionally.
-  printf 'PUBLIC_ORIGIN=https://zagginventorymanager.com\n' >> .env
-  echo "Existing installation: retained legacy public origin. Update PUBLIC_ORIGIN in .env if moving domains."
+else
+  # Update only PUBLIC_ORIGIN; preserve database credentials, tokens and all other settings.
+  python3 - "$ORIGIN" <<'PY'
+import os, sys, tempfile
+from pathlib import Path
+path = Path(".env")
+origin = sys.argv[1]
+lines = path.read_text(encoding="utf-8").splitlines()
+updated = []
+seen = False
+for line in lines:
+    if line.startswith("PUBLIC_ORIGIN="):
+        if not seen:
+            updated.append("PUBLIC_ORIGIN=" + origin)
+            seen = True
+    else:
+        updated.append(line)
+if not seen:
+    updated.append("PUBLIC_ORIGIN=" + origin)
+fd, name = tempfile.mkstemp(prefix=".env-", dir=".")
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write("\n".join(updated) + "\n")
+    os.replace(name, path)
+finally:
+    if os.path.exists(name):
+        os.unlink(name)
+PY
 fi
+echo "Configured public origin: $ORIGIN"
 chmod 600 .env
 # Persist the encryption key across deployments. Never silently rotate an existing key.
 if ! grep -q '^GOOGLE_TOKEN_KEY=' .env; then
@@ -84,7 +133,7 @@ systemctl enable --now inventory-backup.timer
 IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "Inventory Manager started at http://${IP}:18424"
-echo "Open the site and create your 6-digit PIN."
+echo "Open the site and complete the administrator setup."
 echo "For FIRST SETUP only, enter this setup token when prompted:"
 grep '^SETUP_TOKEN=' .env | cut -d= -f2-
 echo ""
