@@ -3,6 +3,9 @@
 These tests are required before calling a deployment production-ready. Automated CI catches syntax, CSS balance and missing DOM references, but cannot prove camera performance or mobile layout.
 
 ## Repair Queue
+- [ ] Overview card shows active repairs, In Progress, awaiting pickup (Ready or Completed), outstanding balances and the oldest four check-ins from the selected store only; Open ticket and View all repairs work on mobile and desktop.
+- [ ] Overview totals and ticket preview update when a repair is checked in, its status changes, pickup is confirmed, or store location changes.
+
 - [ ] **Mark Paid / Picked Up** appears on Ready for Pickup or Completed repairs (including skipping Completed); it records the full remaining balance, time and employee, moves the ticket to history, and cannot be repeated or bypassed through the API.
 - [ ] A fully prepaid repair still supports pickup with no additional payment; a repair still Checked In, In Progress, or Waiting for Parts cannot be picked up.
 - [ ] Repairs tab shows active repairs oldest first on desktop and mobile; completed repairs remain until paid/picked up, with paid/picked-up and cancelled history searchable.
