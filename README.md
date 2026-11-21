@@ -36,19 +36,32 @@ Backups are saved to `/var/backups/inventory-manager` daily at 03:15 local time 
 
 No employee accounts, invoicing, accounting or offline edits in v1.
 
-## Gmail low-stock email alerts
+## Gmail and Google Sign-In for low-stock email alerts
 
-A single Gmail sender account is configured on the **server**. Store administrators can independently enable alerts and set up to 10 recipients for **their currently selected store** in **Administration → Low-stock email alerts**, and send a test message. Global administrators can switch stores to manage each location.
+Store administrators can configure email alerts for **their own store** in **Administration → Low-stock email alerts**. Each store has its own connected Google sending account and up to 10 recipient addresses. Global admins can switch to another store and manage its alerts. Notifications are generated on stock changes at or below the product's minimum and sent once per low-stock cycle; a restock above the minimum rearms the next alert.
 
-1. Enable Google 2-Step Verification for the dedicated sender Gmail account, then generate an App Password at https://myaccount.google.com/apppasswords (where eligible).
-2. On the Ubuntu host, edit `/opt/inventory-manager/.env` (never commit it) and add:
-   ```dotenv
-   SMTP_USER=your-inventory-sender@gmail.com
-   SMTP_APP_PASSWORD=your16characterapppassword
+### Google OAuth setup (recommended)
+
+1. In Google Cloud, enable **Gmail API** and set up an OAuth **Web application** with the **Gmail Send** scope (`https://www.googleapis.com/auth/gmail.send`). Use the authorized origin `https://inv.mrmschf.xyz` and redirect URI `https://inv.mrmschf.xyz/api/google/callback`.
+2. Keep the downloaded Google OAuth client JSON **private**. Transfer it securely to your Ubuntu server (e.g. root's home directory); **never put it in GitHub, upload it to the publicly served app, or copy it to the Docker image**.
+3. On the Ubuntu server, run the installer/update first and then import that JSON:
+
+   ```bash
+   cd /opt/inventory-manager
+   bash deploy/install.sh
+   sudo bash deploy/configure-google.sh /root/google-oauth-client.json
+   docker compose --env-file .env -f deploy/compose.yml up -d --build
    ```
-3. Run `cd /opt/inventory-manager && bash deploy/install.sh`.
-4. Sign in as a store administrator, select the store, enter notification recipients, enable alerts, save, then click **Send test email**.
 
-Alerts are queued when a product's quantity is at or below its configured minimum. A product sends at most one alert per low-stock cycle; it rearms after its quantity rises above the minimum. Email delivery runs asynchronously and retries temporary failures; inventory transactions never depend on Gmail availability. Gmail's sending limits and App Password availability apply. Server logs show delivery errors. The existing 30-second UI inactivity timeout remains separate from the email worker.
+   Replace the JSON filename with the actual private file path. The import script validates the redirect URL and securely adds `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and a persistent `GOOGLE_TOKEN_KEY` to the **gitignored** `.env` with file mode 600. The installer can generate a key as well; never overwrite the existing encryption key or connected accounts' refresh tokens will become unusable. Remove the imported source JSON from the server when no longer needed.
+4. Visit the website, log in as an authorized store administrator, open **Administration → Low-stock email alerts**, and click **Connect Google Account**. Grant access to **send emails**; Google returns to the app. Fill in recipients, enable alerts, **Save email settings**, and **Send test email**.
 
-**Security:** Only the server owner configures the sender credentials. Store administrators can edit their own store's recipient list and enabled status, not the sender password. The existing employee-ID-only login for store admins is not suitable for sensitive production administration; add stronger employee authentication before relying on this authorization model in production.
+Google access tokens are refreshed using an encrypted, per-store refresh token in PostgreSQL; the encrypted value can only be decrypted using the persistent server key. The server does not need each store's Gmail password. Store admins can change or disconnect their own Google sender.
+
+**Important:** If the OAuth app's publishing status is **Testing** with External audience, refresh tokens can expire after 7 days. Google might require app verification for wider production use of the sensitive `gmail.send` scope. Google accounts not listed as test users might be blocked. Back up both the database and the private server `.env` (with tightly controlled access) to preserve connections.
+
+### Optional SMTP fallback
+
+A server operator may configure `SMTP_USER` and `SMTP_APP_PASSWORD` in the host `.env`. When a store has connected a Google account, Gmail API is preferred for that store. Otherwise SMTP is used if configured. SMTP passwords and OAuth client secrets must never be stored in the repository.
+
+**Security:** Existing Employee ID-only store-admin login is a weak authentication boundary. Stronger admin authentication should be added before treating this as production-grade access control.
