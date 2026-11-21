@@ -202,7 +202,7 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
             create.Parameters.AddWithValue("newId",newId);create.Parameters.AddWithValue("name",name);create.Parameters.AddWithValue("oldId",id);
             await create.ExecuteNonQueryAsync();
         }
-        foreach(var table in new[]{"items","movements","employees","employee_store_access","sessions","low_stock_state","alert_outbox"}){
+        foreach(var table in new[]{"items","movements","employees","employee_store_access","sessions","low_stock_state","alert_outbox","store_alert_settings"}){
             await using var move=new NpgsqlCommand($"UPDATE {table} SET store_id=@newId WHERE store_id=@oldId",c,tx);
             move.Parameters.AddWithValue("newId",newId);move.Parameters.AddWithValue("oldId",id);
             await move.ExecuteNonQueryAsync();
