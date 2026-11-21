@@ -710,22 +710,36 @@ $('permissionsForm').onsubmit=async e=>{
  }catch(err){toast(err.message,true)}
 };
 $('assignStoreForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/employees/'+encodeURIComponent($('grantEmployee').value.trim())+'/stores','POST',{storeId:$('grantStore').value.trim()});e.target.reset();$('grantAccessDetails').open=false;toast('Store access granted');loadAdmin()}catch(err){toast(err.message,true)}};
-$('storesList').onclick=async e=>{
- const btn=e.target.closest('[data-edit-store]');if(!btn)return;
- const oldId=btn.dataset.editStore;
- const row=btn.closest('tr');
- const oldName=row.cells[1].textContent;
- const newId=prompt('Store ID',oldId);
- if(newId===null)return;
- const newName=prompt('Location name',oldName);
- if(newName===null)return;
- if(!newId.trim()||!newName.trim())return toast('Store ID and location name are required',true);
- if(newId.trim()===oldId&&newName.trim()===oldName)return;
- if(!confirm('Save changes to '+oldId+'? Linked inventory, employees and history will remain associated with this location.'))return;
- try{
-   await api('admin/stores/'+encodeURIComponent(oldId),'PUT',{id:newId.trim(),name:newName.trim()});
-   toast('Store details updated');allowedStores=await api('admin/stores');updateLocationBrand();await loadAdmin();
- }catch(err){toast(err.message,true)}
+$('storesList').onclick=e=>{
+ const btn=e.target.closest('[data-edit-store]');if(!btn||!identity?.isGlobalAdmin)return;
+ const existing=adminStores.find(store=>store.id===btn.dataset.editStore);
+ if(!existing)return;
+ modal('Edit store location',`<form id="editStoreModalForm">
+  <p class="muted">Update this store's name or ID. All linked inventory, employees, and history will remain associated with the location.</p>
+  <div class="form-grid">
+   <div><label for="editStoreId">Store ID</label><input id="editStoreId" maxlength="24" pattern="[A-Za-z0-9_-]{2,24}" required value="${esc(existing.id)}"></div>
+   <div><label for="editStoreName">Location name</label><input id="editStoreName" maxlength="100" required value="${esc(existing.name)}"></div>
+  </div>
+  <div class="modal-actions"><button type="button" id="cancelStoreEdit" class="btn">Cancel</button><button class="btn primary" id="saveStoreEdit">Save location</button></div>
+ </form>`);
+ $('cancelStoreEdit').onclick=closeModal;
+ $('editStoreModalForm').onsubmit=async event=>{
+  event.preventDefault();
+  const id=$('editStoreId').value.trim(),name=$('editStoreName').value.trim();
+  if(id===existing.id&&name===existing.name){closeModal();return}
+  const save=$('saveStoreEdit');save.disabled=true;save.textContent='Saving…';
+  try{
+   await api('admin/stores/'+encodeURIComponent(existing.id),'PUT',{id,name});
+   closeModal();
+   identity=await api('auth/me');
+   allowedStores=await api('admin/stores');
+   renderStorePicker();updateLocationBrand();
+   $('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;
+   await Promise.all([loadAdmin(),load()]);
+   toast('Store location updated');
+  }catch(err){toast('Could not update location: '+err.message,true)}
+  finally{if(save.isConnected){save.disabled=false;save.textContent='Save location'}}
+ };
 };
 $('storeForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/stores','POST',{id:$('newStoreId').value.trim(),name:$('newStoreName').value.trim()});e.target.reset();$('createStoreDetails').open=false;toast('Store created');loadAdmin()}catch(err){toast(err.message,true)}};
 $('employeeCreateForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/employees','POST',{storeId:$('empStore').value.trim(),id:$('empId').value.trim(),name:$('empName').value.trim()});e.target.reset();$('createEmployeeDetails').open=false;toast('Employee created');loadAdmin()}catch(err){toast(err.message,true)}};
