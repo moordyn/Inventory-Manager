@@ -34,7 +34,8 @@ function renderList(){
     '<div><small>Parts used</small><strong>'+Number(r.partsUsed)+'</strong></div></div>'+
    '<div class="repair-ticket-footer"><div class="repair-ticket-meta">Checked in by <strong>'+safe(r.createdByName)+' ('+safe(r.createdBy)+')</strong><br>'+
     'Technician: '+safe(r.createdByName)+' ('+safe(r.createdBy)+')'+'</div>'+
-    '<button type="button" class="btn" data-repair-open="'+Number(r.id)+'">'+(r.status==='completed'&&!r.pickedUpAt?'Complete pickup →':'Open ticket')+'</button></div></article>'
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" data-repair-open="'+Number(r.id)+'">Open ticket</button>'+
+    (r.status==='completed'&&!r.pickedUpAt?'<button type="button" class="btn primary" data-repair-pickup="'+Number(r.id)+'">Mark Paid / Picked Up</button>':'')+'</div></div></article>'
  ).join(''):'<div class="empty">'+(historical?'No paid/picked-up or cancelled repairs.':'No active repairs at this location.')+'</div>';
 }
 async function refresh(){
@@ -76,6 +77,23 @@ async function createTicket(){
  };
  $r('repairCreateForm').addEventListener('input',()=>delete $r('repairCreateForm').dataset.requestKey);
  $r('repairCreateForm').addEventListener('change',()=>delete $r('repairCreateForm').dataset.requestKey);
+}
+async function confirmPickup(id,balance,button){
+ if(button.disabled)return;
+ if(!window.confirm('Confirm that the remaining '+usd(balance)+' has been paid and the customer picked up the device? This action is final.'))return;
+ button.disabled=true;
+ const original=button.textContent;
+ button.textContent='Confirming pickup…';
+ button.dataset.requestKey||=key();
+ try{
+  const result=await api('repairs/'+id+'/pickup','POST',{idempotencyKey:button.dataset.requestKey});
+  toast(result.duplicate?'Pickup already recorded.':'Repair paid and picked up');
+  await refresh();
+  if($r('modalRoot').querySelector('#repairConfirmPickup'))await openTicket(id);
+ }catch(err){
+  toast('Pickup not recorded: '+err.message,true);
+  if(button.isConnected){button.disabled=false;button.textContent=original}
+ }
 }
 async function openTicket(id,scanned=''){
  let detail;
@@ -155,17 +173,7 @@ async function openTicket(id,scanned=''){
  };
  if(t.status==='completed'&&!t.pickedUpAt){
   const button=$r('repairConfirmPickup');
-  button.onclick=async()=>{
-   if(button.disabled)return;
-   if(!window.confirm('Confirm the customer paid the remaining '+usd(t.balanceDue)+' and picked up the device? This will close the repair.'))return;
-   button.disabled=true;button.textContent='Confirming pickup…';
-   button.dataset.requestKey||=key();
-   try{
-    const result=await api('repairs/'+id+'/pickup','POST',{idempotencyKey:button.dataset.requestKey});
-    toast(result.duplicate?'Pickup was already recorded.':'Repair paid and picked up');
-    await refresh();await openTicket(id);
-   }catch(err){toast('Pickup not recorded: '+err.message,true);button.disabled=false;button.textContent='Mark Paid / Picked Up'}
-  };
+  button.onclick=()=>void confirmPickup(id,t.balanceDue,button);
  }
  $r('modalRoot').querySelectorAll('[data-repair-return]').forEach(button=>{
   button.onclick=async()=>{
@@ -193,6 +201,13 @@ $r('repairNewBtn').onclick=()=>void createTicket();
 $r('repairSearch').oninput=renderList;
 $r('repairShowHistory').onchange=()=>{historical=$r('repairShowHistory').checked;rows=[];renderList();void refresh()};
 $r('repairQueueList').onclick=e=>{
+ const pickup=e.target.closest('[data-repair-pickup]');
+ if(pickup){
+  const row=rows.find(r=>Number(r.id)===Number(pickup.dataset.repairPickup));
+  if(row&&row.status==='completed'&&!row.pickedUpAt)
+   void confirmPickup(Number(row.id),row.balanceDue,pickup);
+  return;
+ }
  const btn=e.target.closest('[data-repair-open]');
  if(btn)void openTicket(Number(btn.dataset.repairOpen));
 };
