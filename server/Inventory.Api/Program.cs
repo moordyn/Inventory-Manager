@@ -317,7 +317,7 @@ app.MapDelete("/api/admin/employees/{id}/stores/{storeId}",async (HttpContext ct
         primaryStore=reader.GetString(0);targetGlobalAdmin=reader.GetBoolean(1);
     }
     if(primaryStore==storeId)return Results.BadRequest("The employee's primary store access cannot be removed.");
-    if(targetGlobalAdmin&&!who.Value.globalAdmin)return Results.Forbid();
+    if(targetGlobalAdmin)return Results.BadRequest("Global administrators already have access to all stores. Change their global administrator role before managing individual store assignments.");
 
     await using(var remove=new NpgsqlCommand("DELETE FROM employee_store_access WHERE employee_id=@employee AND store_id=@store",c,tx)){
         remove.Parameters.AddWithValue("employee",id);
