@@ -466,14 +466,13 @@ body[data-theme="glacier"] tbody tr:hover,
 
 
 
-/* Fluid canvas is theme-colored (never black) and stays behind an accessible login card. */
-.login-screen{position:relative;isolation:isolate;overflow:hidden;background:radial-gradient(ellipse 90% 65% at 80% 20%,color-mix(in srgb,var(--accent) 25%,transparent),transparent 78%),linear-gradient(145deg,var(--sidebar),var(--bg) 58%,var(--panel))}
-.login-aurora{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:1}
-.login-screen::before{content:"";position:absolute;inset:-20%;z-index:0;pointer-events:none;background:radial-gradient(ellipse 55% 48% at 48% 52%,color-mix(in srgb,var(--accent) 13%,transparent),transparent 80%);filter:blur(58px)}
-.login-screen>.login-card{position:relative;z-index:1;backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);background:color-mix(in srgb,var(--panel) 90%,transparent);box-shadow:0 24px 90px #0004}
+/* Ambient login aurora. The canvas is visual-only; form controls retain all pointer access. */
+.login-screen{position:relative;isolation:isolate;overflow:hidden;background:var(--bg)}
+.login-aurora{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:.95}
+.login-screen::before{content:"";position:absolute;inset:-20%;z-index:0;pointer-events:none;background:radial-gradient(ellipse 46% 36% at 54% 44%,color-mix(in srgb,var(--accent) 9%,transparent),transparent 75%);filter:blur(60px)}
+.login-screen>.login-card{position:relative;z-index:1;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 24px 90px #0003}
 body[data-theme="glacier"] .login-screen>.login-card{background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 24px 80px #274c6b24}
 @media(prefers-reduced-motion:reduce){.login-aurora{display:none}.login-screen::before{filter:none}}
-
 
 /* Theme-matched sign-out buttons instead of fixed brown warning colors. */
 #sidebarLogoutBtn,#mobileLogoutBtn,
@@ -684,7 +683,6 @@ body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srg
 </form><p class="muted" style="margin-top:12px">You are signed out after 15 minutes without activity. No countdown is displayed.</p></section><section class="card" style="margin-top:18px"><h2>Server settings</h2><p class="muted" style="margin:12px 0">All inventory is stored centrally on this server. An internet connection is required.</p><p>Server: <strong id="serverHost"></strong></p><p style="margin-top:16px"><button class="btn" id="refreshBtn">↻ Refresh data</button> <button class="btn warn" id="logoutBtn">Sign out</button></p><p class="muted" style="margin-top:16px">Employee access uses individual passwords. Automatic sign-out occurs after 15 minutes of inactivity. Database backups are managed by the server.</p></section></div>
 </main><nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation"><button data-page="overview" class="active"><span>▦</span>Home</button><button data-page="inventory"><span>▤</span>Items</button><button data-page="checkin"><span>↙</span>In</button><button data-page="checkout"><span>↗</span>Out</button><button data-page="history"><span>◷</span>History</button><button data-page="administration" id="mobileAdminNav" class="hidden"><span>♙</span>Admin</button></nav></div>
 <div id="modalRoot"></div><div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
-<script src="/assets/login-fluid.js?v=4"></script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
@@ -729,11 +727,110 @@ function renderThemeSelectors(){
 /* Theme-driven nebula: ambient drift plus mouse/touch-controlled luminous swishes.
    Uses one capped-DPR canvas, pauses while signed in/hidden, and respects reduced motion. */
 // The fluid engine owns the login canvas; the in-app ambience is separate.
-const loginAurora=window.createLoginFluid
- ? window.createLoginFluid($('loginAurora'),$('auth'))
- : {start(){},stop(){},palette(){}};
-
-
+const loginAurora=(()=>{
+ const canvas=$('loginAurora'),context=canvas.getContext('2d',{alpha:true});
+ if(!context)return{start(){},stop(){},palette(){}};
+ const media=window.matchMedia('(prefers-reduced-motion: reduce)');
+ let width=0,height=0,palette=null,frame=0,lastFrame=0,active=false,pointer=null,lastPointer=null,clouds=[],trails=[],tick=0;
+ const parseHex=v=>{
+  let color=String(v||'').trim();
+  if(/^#[0-9a-f]{3}$/i.test(color))color='#'+[...color.slice(1)].map(x=>x+x).join('');
+  if(!/^#[0-9a-f]{6}$/i.test(color))return[145,221,186];
+  return[1,3,5].map(i=>parseInt(color.slice(i,i+2),16));
+ };
+ const rgba=(rgb,alpha)=>'rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+','+alpha+')';
+ function updatePalette(){
+  const styles=getComputedStyle(document.body);
+  const accent=parseHex(styles.getPropertyValue('--accent'));
+  const border=parseHex(styles.getPropertyValue('--active-border'));
+  const text=parseHex(styles.getPropertyValue('--muted'));
+  palette=[accent,border,text];
+ }
+ function resize(){
+  const rect=canvas.getBoundingClientRect();
+  width=rect.width;height=rect.height;
+  if(!width||!height)return;
+  const dpr=Math.min(window.devicePixelRatio||1,1.5);
+  canvas.width=Math.max(1,Math.round(width*dpr));canvas.height=Math.max(1,Math.round(height*dpr));
+  context.setTransform(dpr,0,0,dpr,0,0);
+  clouds=Array.from({length:5},(_,i)=>({
+   x:width*(.14+i*.18),y:height*(.2+(i%3)*.27),
+   radius:Math.max(width,height)*(.24+(i%2)*.09),phase:i*1.7,tint:i%3
+  }));
+ }
+ function bloom(x,y,r,color,alpha){
+  if(r<=0||alpha<=0)return;
+  const gradient=context.createRadialGradient(x,y,0,x,y,r);
+  gradient.addColorStop(0,rgba(color,alpha));
+  gradient.addColorStop(.26,rgba(color,alpha*.58));
+  gradient.addColorStop(.65,rgba(color,alpha*.13));
+  gradient.addColorStop(1,rgba(color,0));
+  context.fillStyle=gradient;context.beginPath();context.arc(x,y,r,0,Math.PI*2);context.fill();
+ }
+ function render(now){
+  if(!active)return;
+  frame=requestAnimationFrame(render);
+  if(now-lastFrame<33)return; // ~30fps max while the sign-in view is visible
+  const dt=Math.min((now-lastFrame)||33,70);
+  lastFrame=now;tick+=dt*.00035;
+  context.clearRect(0,0,width,height);
+  if(!width||!height||!palette)return;
+  const light=document.body.dataset.theme==='glacier';
+  for(const c of clouds){
+   const x=c.x+Math.sin(tick*.85+c.phase)*width*.10;
+   const y=c.y+Math.cos(tick*.62+c.phase)*height*.10;
+   bloom(x,y,c.radius,palette[c.tint],light?.105:.14);
+  }
+  if(pointer){
+   bloom(pointer.x,pointer.y,Math.max(135,Math.min(width,height)*.29),palette[0],light?.13:.20);
+   bloom(pointer.x+35,pointer.y-28,Math.max(90,Math.min(width,height)*.19),palette[1],light?.08:.11);
+  }
+  trails=trails.filter(t=>now-t.born<1600);
+  for(const t of trails){
+   const progress=(now-t.born)/1600;
+   const spread=26+progress*125+t.power*22;
+   bloom(t.x+t.vx*progress*35,t.y+t.vy*progress*35,spread,palette[t.tint],(light?.22:.27)*Math.pow(1-progress,1.45));
+  }
+ }
+ function move(e){
+  if(!active||media.matches)return;
+  const rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;
+  const x=e.clientX-rect.left,y=e.clientY-rect.top;
+  const current={x,y};
+  if(lastPointer){
+   const dx=x-lastPointer.x,dy=y-lastPointer.y;
+   const dist=Math.hypot(dx,dy);
+   if(dist>4){
+    const steps=Math.min(5,Math.ceil(dist/25)),now=performance.now();
+    for(let i=1;i<=steps;i++)trails.push({
+      x:lastPointer.x+dx*i/steps,y:lastPointer.y+dy*i/steps,
+      vx:dx/(dist||1),vy:dy/(dist||1),power:Math.min(dist/70,2.5),
+      tint:(trails.length+i)%3,born:now
+    });
+    if(trails.length>75)trails.splice(0,trails.length-75);
+   }
+  }
+  pointer=current;lastPointer=current;
+ }
+ function leave(){lastPointer=null;pointer=null}
+ function stop(){
+  active=false;cancelAnimationFrame(frame);lastFrame=0;pointer=null;lastPointer=null;trails=[];
+  context.clearRect(0,0,width,height);
+ }
+ function start(){
+  stop();updatePalette();
+  if(media.matches||document.hidden)return;
+  resize();if(!width||!height)return;
+  active=true;frame=requestAnimationFrame(render);
+ }
+ canvas.parentElement.addEventListener('pointermove',move,{passive:true});
+ canvas.parentElement.addEventListener('pointerleave',leave,{passive:true});
+ canvas.parentElement.addEventListener('pointerdown',move,{passive:true});
+ window.addEventListener('resize',()=>{if(active)resize()},{passive:true});
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();else if(!$('auth').classList.contains('hidden'))start()});
+ media.addEventListener('change',()=>{if(media.matches)stop();else if(!$('auth').classList.contains('hidden'))start()});
+ return {start,stop,palette:updatePalette};
+})();
 
 /* Low-intensity, non-interactive dashboard ambience; separate from the login aurora.
    A fixed canvas prevents tall inventory pages from growing the render surface. */
