@@ -206,6 +206,16 @@ assert.ok(audit.some(x=>x.action==='access.revoked'&&x.storeId==='BRANCH2'));
 
 await call('admin/employees/TESTUSER/permissions',{token:admin,method:'PUT',body:{globalAdmin:false,storeAdminIds:['DEFAULT']},expect:200});
 const storeAdmin=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:200})).body.token;
+// Store admins can rename themselves and ordinary members of their store,
+// but not another store/global admin; global admins can rename anyone.
+await call('admin/employees/OWNER/name',{token:storeAdmin,method:'PUT',body:{name:'Blocked Owner Rename'},expect:403});
+await call('admin/employees/TESTUSER/name',{token:storeAdmin,method:'PUT',body:{name:'Store Lead'},expect:200});
+assert.equal((await call('auth/me',{token:storeAdmin})).body.employeeName,'Store Lead');
+await call('admin/employees/OWNER/name',{token:admin,method:'PUT',body:{name:'Company Owner'},expect:200});
+assert.equal((await call('auth/me',{token:admin})).body.employeeName,'Company Owner');
+await call('admin/employees/TESTUSER/name',{token:admin,method:'PUT',body:{name:'Test Employee Renamed'},expect:200});
+assert.equal((await call('auth/me',{token:storeAdmin})).body.employeeName,'Test Employee Renamed');
+await call('admin/employees/TESTUSER/name',{token:storeAdmin,method:'PUT',body:{name:' '},expect:400});
 const scoped=(await call('admin/audit',{token:storeAdmin})).body;
 assert.ok(scoped.every(x=>x.storeId==='DEFAULT'),'Store admins only see their own location activity');
 await call('admin/stores',{token:storeAdmin,method:'POST',body:{id:'NOPE',name:'Should not be created'},expect:403});
@@ -222,6 +232,7 @@ const renamedHistory=(await call('items/'+id+'/history',{token:admin})).body;
 assert.ok(renamedHistory.some(x=>x.employeeId==='RENAMEDUSER'));
 const renamedAccess=(await call('admin/employee-access',{token:admin})).body;
 assert.ok(renamedAccess.some(x=>x.employeeId==='RENAMEDUSER'));
+assert.equal((await call('auth/me',{token:renamedLogin})).body.employeeName,'Test Employee Renamed');
 const renamedToken=renamedLogin;
 
 // Forgot-password recovery goes only to the already-verified email and invalidates old sessions.
