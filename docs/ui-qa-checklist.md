@@ -59,7 +59,7 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] Open the product's **Edit → View history** and confirm the new note appears there too
 - [ ] Verify checkout quantity, before/after balances, original checkout timestamp and original employee are unchanged
 - [ ] Edit the same checkout twice, then open **View changes** to inspect previous values, revision author and timestamp
-- [ ] A non-admin employee can change their own checkout's note, but not a coworker's
+- [ ] A standard employee can update both their own checkout and another employee's checkout in their currently selected store; verify editor attribution in View changes
 - [ ] Store/global administrators can edit a checkout note within an authorized store
 - [ ] Attempt to edit a check-in note, a different store's checkout, or a stale note revision; verify rejection
 - [ ] Confirm the note editor cannot save blank notes or more than 1,000 characters
