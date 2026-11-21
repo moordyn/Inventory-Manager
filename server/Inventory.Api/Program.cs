@@ -98,7 +98,7 @@ app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
 app.MapPost("/api/auth/employee-login",async (EmployeeLogin req)=>{
     if(string.IsNullOrWhiteSpace(req.EmployeeId))return Results.Unauthorized();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT a.store_id FROM employee_store_access a JOIN employees e ON e.id=a.employee_id JOIN stores s ON s.id=a.store_id WHERE a.employee_id=@employee AND e.active AND s.active ORDER BY a.store_id LIMIT 1",c);
+    await using var cmd=new NpgsqlCommand("SELECT a.store_id FROM employee_store_access a JOIN employees e ON e.id=a.employee_id JOIN stores s ON s.id=a.store_id WHERE a.employee_id=@employee AND e.active AND s.active ORDER BY CASE WHEN a.store_id=e.primary_store_id THEN 0 ELSE 1 END,a.store_id LIMIT 1",c);
     cmd.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
     await using(var count=new NpgsqlCommand("SELECT count(*) FROM employees WHERE id=@employee AND active",c)){
         count.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
