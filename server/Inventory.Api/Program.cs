@@ -93,7 +93,13 @@ async Task<(string store,string employee,bool admin)?> Identity(HttpContext ctx)
 }
 app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
     var who=await Identity(ctx);
-    return who is null?Results.Unauthorized():Results.Ok(new{storeId=who.Value.store,employeeId=who.Value.employee,isAdmin=who.Value.admin});
+    if(who is null)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT name FROM employees WHERE id=@employee ORDER BY CASE WHEN primary_store_id=@store THEN 0 ELSE 1 END LIMIT 1",c);
+    cmd.Parameters.AddWithValue("employee",who.Value.employee);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
+    var employeeName=(string?)await cmd.ExecuteScalarAsync()??who.Value.employee;
+    return Results.Ok(new{storeId=who.Value.store,employeeId=who.Value.employee,employeeName,isAdmin=who.Value.admin});
 });
 app.MapPost("/api/auth/employee-login",async (EmployeeLogin req)=>{
     if(string.IsNullOrWhiteSpace(req.EmployeeId))return Results.Unauthorized();
