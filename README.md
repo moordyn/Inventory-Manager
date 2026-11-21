@@ -33,6 +33,7 @@ Replace `inventory.example.com` with a hostname **you control** (root domain or 
 | Need | Guide |
 | --- | --- |
 | Install, upgrade, domain, DNS, TLS, Google OAuth, SMTP | [Deployment](docs/deployment.md) |
+| Optional Cloudflare DNS, OPNsense DDNS and Nginx Proxy Manager detail | [Networking examples](docs/networking-examples.md) |
 | First-run owner, employees, roles, email, ID changes, security model | [Accounts and permissions](docs/accounts.md) |
 | Backups, restore, troubleshooting, monitoring, disaster recovery | [Operations](docs/operations.md) |
 | Service/data design and source locations | [Architecture](docs/architecture.md) |
