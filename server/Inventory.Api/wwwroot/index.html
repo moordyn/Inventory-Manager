@@ -88,8 +88,8 @@ input,select,textarea{transition:border-color .15s,box-shadow .15s}input[type=ch
 <div class="view" id="view-history"><section class="card"><div class="section-head"><div><h2>Transaction history</h2><p>Every recorded stock movement</p></div><button class="btn" id="exportBtn">↓ Export CSV</button></div><div id="historyTable" class="table-wrap"></div></section></div>
 <div class="view" id="view-administration">
 <section class="card hidden" id="globalGoogleConfig" style="margin-bottom:18px">
- <div class="admin-head"><div><h2>Google OAuth configuration</h2><p>Configure Google sign-in for all store locations</p></div><span class="role-pill">Global admin only</span></div>
- <p class="muted" style="font-size:13px;margin:12px 0">Upload the <strong>Web application OAuth Client JSON</strong> downloaded from Google Cloud. The Client Secret is encrypted on the server and will not be displayed or saved in your browser. Importing activates the Google sign-in buttons for store admins without editing server files.</p>
+ <div class="admin-head"><div><h2>Global email sender</h2><p>One Gmail account sends inventory notifications for every store</p></div><span class="role-pill">Global admin only</span></div>
+ <p class="muted" style="font-size:13px;margin:12px 0">Upload the <strong>Web application OAuth Client JSON</strong> downloaded from Google Cloud. The Client Secret is encrypted on the server and will not be displayed or saved in your browser. Importing enables the global Gmail connection below without editing server files.</p>
  <div class="google-config-status" id="googleOAuthConfigStatus" aria-live="polite">Checking Google OAuth configuration…</div>
  <form id="googleOAuthImportForm" class="admin-form" style="margin-top:14px">
   <div class="form-grid">
@@ -98,23 +98,29 @@ input,select,textarea{transition:border-color .15s,box-shadow .15s}input[type=ch
   </div>
   <button type="submit" class="btn primary" id="googleOAuthImportBtn">Import Google configuration</button>
  </form>
- <p class="muted" style="font-size:12px;margin-top:12px">Credentials are shared for the Google authorization application, not for the connected Gmail accounts. Each store still chooses its own Google sender and alert recipients. Replacing the OAuth Client ID requires disconnecting existing store accounts first.</p>
+ <p class="muted" style="font-size:12px;margin-top:12px">This OAuth application authorizes one global Gmail sender. Store administrators only manage their own notification recipients and alerts. To replace the OAuth Client ID, first disconnect the global Gmail sender.</p>
+ <div class="google-connect-panel">
+  <div class="google-connect-copy">
+   <strong>Sending Gmail account (all stores)</strong>
+   <p id="globalGoogleConnectionStatus" class="muted">Checking global sender…</p>
+  </div>
+  <div class="admin-tools">
+   <button class="btn primary" id="connectGlobalGoogleBtn" type="button">Connect global Gmail</button>
+   <button class="btn" id="disconnectGlobalGoogleBtn" type="button" style="display:none">Disconnect</button>
+  </div>
+ </div>
 </section>
 <section class="card" style="margin-bottom:18px">
  <div class="admin-head"><div><h2>Low-stock email alerts</h2><p>Notifications for the currently selected store</p></div><span class="role-pill">Store-specific</span></div>
  <div class="google-connect-panel">
   <div class="google-connect-copy">
-    <strong>Google account</strong>
-    <p id="googleConnectionStatus" class="muted">Checking connection…</p>
-  </div>
-  <div class="admin-tools">
-    <button class="btn primary" id="connectGoogleBtn" type="button">Get email alerts with Google</button>
-    <button class="btn" id="disconnectGoogleBtn" type="button" style="display:none">Disconnect</button>
+    <strong>Sender managed globally</strong>
+    <p id="storeSenderStatus" class="muted">Checking the company-wide Gmail sender…</p>
   </div>
  </div>
  <form id="alertSettingsForm" class="admin-form">
   <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="alertsEnabled" style="width:auto"> Get email alerts when an item reaches its minimum stock level</label>
-  <label for="alertRecipients">Notification recipients</label>
+  <label for="alertRecipients">Email addresses to receive this store’s low-stock alerts</label>
   <textarea id="alertRecipients" rows="2" placeholder="manager@gmail.com, another.manager@gmail.com"></textarea>
   <p class="muted" style="font-size:12px;margin-top:6px">Separate addresses with commas. Up to 10 recipients per store. Each product triggers one alert until it is restocked above its minimum.</p>
   <div class="admin-tools" style="margin-top:14px"><button class="btn primary" type="submit">Save email settings</button><button class="btn" type="button" id="sendTestAlert">Send test email</button></div>
@@ -164,7 +170,7 @@ async function enter(){try{identity=await api('auth/me');$('signedInEmployee').t
  if(googleReturn){
    window.history.replaceState(null,'',location.pathname+location.hash);
    if(identity?.isAdmin)navigate('administration');
-   const googleMessages={connected:'Google account connected to this store.',cancelled:'Google sign-in was cancelled.',expired:'Google sign-in expired. Try connecting again.',unauthorized:'You no longer have permission to connect this store.',no_refresh_token:'Google did not grant offline email access. Reconnect and approve access.',unverified:'Google account email could not be verified.',not_configured:'Google integration is not configured on the server.',failed:'Google sign-in could not be completed. Please try again.'};
+   const googleMessages={connected:'Global Gmail sender connected for every store.',cancelled:'Google sign-in was cancelled.',expired:'Google sign-in expired. Try connecting again.',unauthorized:'You no longer have permission to connect this store.',no_refresh_token:'Google did not grant offline email access. Reconnect and approve access.',unverified:'Google account email could not be verified.',not_configured:'Google integration is not configured on the server.',failed:'Google sign-in could not be completed. Please try again.'};
    toast(googleMessages[googleReturn]||'Google sign-in finished.',googleReturn!=='connected');
  }
  }catch(e){
@@ -331,14 +337,20 @@ $('storePicker').onchange=async e=>{
 let adminStores=[],adminEmployees=[],adminAccess=[],selectedPermissionEmployee=null;
 async function loadGlobalGoogleConfig(){
  if(!identity?.isGlobalAdmin)return;
- const status=$('googleOAuthConfigStatus');
+ const status=$('googleOAuthConfigStatus'),senderStatus=$('globalGoogleConnectionStatus');
  try{
-  const config=await api('admin/google-oauth/config');
+  const [config,sender]=await Promise.all([api('admin/google-oauth/config'),api('admin/google-sender')]);
   if(!identity?.isGlobalAdmin)return;
   status.textContent=config.configured
    ?'Configured · Client ID: '+config.clientId+(config.source==='dashboard'?' · Uploaded through dashboard':' · Configured on server')
    :config.encryptionReady?'Google sign-in is not configured yet. Select your downloaded JSON file below.':'Server encryption is not configured. Run the latest installer before importing the file.';
- }catch(err){status.textContent='Unable to load Google configuration: '+err.message}
+  senderStatus.textContent=sender.connected
+   ?'Connected as '+sender.email+' · Sends notifications for every store'
+   :sender.smtpConfigured?'No global Google account connected. The server SMTP sender is available.':'No global Gmail sender connected yet.';
+  $('connectGlobalGoogleBtn').textContent=sender.connected?'Change global Gmail account':'Connect global Gmail';
+  $('connectGlobalGoogleBtn').disabled=!sender.googleConfigured;
+  $('disconnectGlobalGoogleBtn').style.display=sender.connected?'':'none';
+ }catch(err){status.textContent='Unable to load Google configuration: '+err.message;senderStatus.textContent='Could not load global sender status.'}
 }
 $('googleOAuthImportForm').onsubmit=async e=>{
  e.preventDefault();
@@ -349,12 +361,27 @@ $('googleOAuthImportForm').onsubmit=async e=>{
  button.disabled=true;button.textContent='Importing…';
  try{
   const contents=await file.text();
-  const response=await api('admin/google-oauth/import','POST',{json:contents,pin});
+  await api('admin/google-oauth/import','POST',{json:contents,pin});
   $('googleOAuthFile').value='';$('googleOAuthPin').value='';
-  toast('Google OAuth configured. Store admins can now connect their accounts.');
+  toast('Google OAuth configured. Connect the global Gmail sender below.');
   await Promise.all([loadGlobalGoogleConfig(),loadAlertSettings()]);
  }catch(err){$('googleOAuthPin').value='';toast('Import failed: '+err.message,true)}
  finally{button.disabled=false;button.textContent='Import Google configuration'}
+};
+$('connectGlobalGoogleBtn').onclick=async()=>{
+ if(!identity?.isGlobalAdmin)return;
+ const button=$('connectGlobalGoogleBtn');button.disabled=true;
+ try{
+  const result=await api('google/connect','POST');
+  if(!result.url||!result.url.startsWith('https://accounts.google.com/'))throw Error('Google sign-in could not start.');
+  window.location.assign(result.url);
+ }catch(err){toast('Global Gmail connection failed: '+err.message,true);button.disabled=false}
+};
+$('disconnectGlobalGoogleBtn').onclick=async()=>{
+ if(!identity?.isGlobalAdmin)return;
+ if(!confirm('Disconnect the global Gmail sender for ALL stores? Notifications will stop until a new global sender is connected, unless server SMTP is available.'))return;
+ try{await api('google/disconnect','POST');toast('Global Gmail sender disconnected');await Promise.all([loadGlobalGoogleConfig(),loadAlertSettings()])}
+ catch(err){toast('Unable to disconnect global Gmail: '+err.message,true)}
 };
 async function loadAlertSettings(){
  if(!identity?.isAdmin)return;
@@ -364,27 +391,14 @@ async function loadAlertSettings(){
   if(identity?.storeId!==store)return;
   $('alertsEnabled').checked=settings.enabled;
   $('alertRecipients').value=settings.recipients||'';
-  $('googleConnectionStatus').textContent=settings.googleEmail?'Connected as '+settings.googleEmail:'No Google account connected for this store.';
-  $('connectGoogleBtn').textContent=settings.googleEmail?'Change Google Account':'Get email alerts with Google';
-  $('connectGoogleBtn').disabled=!settings.googleConfigured;
-  $('disconnectGoogleBtn').style.display=settings.googleEmail?'':'none';
-  $('smtpStatus').textContent=settings.googleEmail?(settings.googleConfigured?'Emails will be sent using this store’s connected Google account.':'Google sign-in is not fully configured on the server.'):settings.googleConfigured?'Connect a Google account to send alerts from this store.':settings.senderConfigured?'Using server Gmail SMTP. Google sign-in requires OAuth server configuration.':'Google sign-in needs server configuration. Ask the server owner to configure its OAuth credentials.';
+  $('storeSenderStatus').textContent=settings.senderType==='google'
+   ?'Low-stock emails are sent from '+settings.globalSenderEmail+' for all stores.'
+   :settings.senderType==='smtp'?'Alerts use the central email sender configured by the global administrator.':'A global administrator must connect a Gmail sending account before notifications can be delivered.';
+  $('smtpStatus').textContent=settings.senderConfigured
+   ?'Set the recipients for this store, enable alerts, and save. You can also send a test email.'
+   :'Email sending is not configured globally yet. Your recipient preferences can still be saved.';
  }catch(e){toast('Unable to load email settings: '+e.message,true)}
 }
-$('connectGoogleBtn').onclick=async()=>{
- const button=$('connectGoogleBtn');
- button.disabled=true;
- try{
-  const result=await api('google/connect','POST');
-  if(!result.url||!result.url.startsWith('https://accounts.google.com/'))throw Error('Google sign-in could not start.');
-  window.location.assign(result.url);
- }catch(err){toast('Google connection failed: '+err.message,true);button.disabled=false}
-};
-$('disconnectGoogleBtn').onclick=async()=>{
- if(!confirm('Disconnect the Google sender for this store? Automatic email alerts will stop unless a server SMTP sender is configured.'))return;
- try{await api('google/disconnect','POST');toast('Google account disconnected');await loadAlertSettings()}
- catch(err){toast('Unable to disconnect Google: '+err.message,true)}
-};
 $('alertSettingsForm').onsubmit=async e=>{
  e.preventDefault();
  try{
