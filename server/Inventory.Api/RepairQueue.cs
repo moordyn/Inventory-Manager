@@ -250,9 +250,10 @@ static class RepairQueueEndpoints
                 """,c,tx)){
                 keyCheck.Parameters.AddWithValue("key",req.IdempotencyKey);
                 await using var reader=await keyCheck.ExecuteReaderAsync();
-                if(await reader.ReadAsync() &&
-                    (reader.GetInt64(0)!=id || reader.GetString(1)!=who.Value.store))
-                    return Results.Conflict("This confirmation key was used for another repair.");
+                if(await reader.ReadAsync()){
+                    if(reader.GetString(1)!=who.Value.store)return Results.NotFound();
+                    if(reader.GetInt64(0)!=id)return Results.Conflict("This confirmation key was used for another repair.");
+                }
             }
             // Locking the repair serializes pickup with status and inventory changes.
             string status;decimal quote,deposit;DateTime? priorPickup;Guid? priorKey;
