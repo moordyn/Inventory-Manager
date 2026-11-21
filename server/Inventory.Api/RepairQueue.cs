@@ -47,7 +47,8 @@ static class RepairQueueEndpoints
                        COALESCE((SELECT sum(amount) FROM repair_payments WHERE repair_id=r.id),0),
                        r.created_at,r.updated_at,r.closed_at,
                        (SELECT COALESCE(sum(quantity),0) FROM repair_parts WHERE repair_id=r.id AND returned_at IS NULL),
-                       COALESCE(r.customer_name,''),COALESCE(r.serial_number,'')
+                       COALESCE(r.customer_name,''),COALESCE(r.serial_number,''),
+                       r.picked_up_at,r.picked_up_by
                 FROM repair_tickets r LEFT JOIN employees creator ON creator.id=r.created_by
                 WHERE r.store_id=@store
                   AND (CASE WHEN @history THEN r.status IN ('completed','cancelled')
@@ -69,7 +70,9 @@ static class RepairQueueEndpoints
                     quotedTotal=quoted,paidUpfront=upfront,additionalPaid=extra,
                     balanceDue=quoted-upfront-extra,createdAt=reader.GetDateTime(10),
                     updatedAt=reader.GetDateTime(11),closedAt=reader.IsDBNull(12)?(DateTime?)null:reader.GetDateTime(12),
-                    partsUsed=reader.GetInt64(13),customerName=reader.GetString(14),serialNumber=reader.GetString(15)
+                    partsUsed=reader.GetInt64(13),customerName=reader.GetString(14),serialNumber=reader.GetString(15),
+                    pickedUpAt=reader.IsDBNull(16)?(DateTime?)null:reader.GetDateTime(16),
+                    pickedUpBy=reader.IsDBNull(17)?null:reader.GetString(17)
                 });
             }
             return Results.Ok(rows);
@@ -83,7 +86,8 @@ static class RepairQueueEndpoints
                   r.assigned_to,r.status,r.quoted_total,r.paid_upfront,
                   COALESCE((SELECT sum(p.amount) FROM repair_payments p WHERE p.repair_id=r.id),0),
                   r.created_at,r.closed_at,r.updated_at,
-                  COALESCE(r.customer_name,''),COALESCE(r.customer_contact,''),COALESCE(r.serial_number,''),COALESCE(r.notes,'')
+                  COALESCE(r.customer_name,''),COALESCE(r.customer_contact,''),COALESCE(r.serial_number,''),COALESCE(r.notes,''),
+                  r.picked_up_at,r.picked_up_by
                 FROM repair_tickets r LEFT JOIN employees e ON e.id=r.created_by
                 WHERE r.id=@id AND r.store_id=@store
                 """,c)){
@@ -101,7 +105,9 @@ static class RepairQueueEndpoints
                         closedAt=reader.IsDBNull(11)?(DateTime?)null:reader.GetDateTime(11),
                         updatedAt=reader.GetDateTime(12),customerName=reader.GetString(13),
                         customerContact=reader.GetString(14),serialNumber=reader.GetString(15),
-                        notes=reader.GetString(16)
+                        notes=reader.GetString(16),
+                        pickedUpAt=reader.IsDBNull(17)?(DateTime?)null:reader.GetDateTime(17),
+                        pickedUpBy=reader.IsDBNull(18)?null:reader.GetString(18)
                     };
                 }
             }
@@ -204,12 +210,15 @@ static class RepairQueueEndpoints
             var who=await identity(ctx);if(who is null)return Results.Unauthorized();
             if(!ValidStatus(req.Status))return Results.BadRequest("Unknown repair status.");
             await using var c=await connect();await using var tx=await c.BeginTransactionAsync();
-            string? old;
-            await using(var get=new NpgsqlCommand("SELECT status FROM repair_tickets WHERE id=@id AND store_id=@store FOR UPDATE",c,tx)){
+            string? old;bool pickedUp;
+            await using(var get=new NpgsqlCommand("SELECT status,picked_up_at FROM repair_tickets WHERE id=@id AND store_id=@store FOR UPDATE",c,tx)){
                 get.Parameters.AddWithValue("id",id);get.Parameters.AddWithValue("store",who.Value.store);
-                old=(string?)await get.ExecuteScalarAsync();
+                await using var reader=await get.ExecuteReaderAsync();
+                if(!await reader.ReadAsync())return Results.NotFound();
+                old=reader.GetString(0);
+                pickedUp=!reader.IsDBNull(1);
             }
-            if(old is null)return Results.NotFound();
+            if(pickedUp && old!=req.Status)return Results.Conflict("Paid and picked-up repairs cannot be reopened or changed.");
             if(old==req.Status)return Results.Ok(new{updated=false,status=old});
             await using(var set=new NpgsqlCommand("""
                 UPDATE repair_tickets SET status=@status,updated_at=now(),
@@ -226,53 +235,71 @@ static class RepairQueueEndpoints
             await tx.CommitAsync();
             return Results.Ok(new{updated=true,status=req.Status});
         });
-        app.MapPost("/api/repairs/{id:long}/payments",async (HttpContext ctx,long id,RepairPaymentRequest req)=>{
+        // Final settlement and physical pickup are recorded atomically.
+        // "Completed" means repair work is finished; pickup is a separate one-way event.
+        app.MapPost("/api/repairs/{id:long}/pickup",async (HttpContext ctx,long id,RepairPickupRequest req)=>{
             var who=await identity(ctx);if(who is null)return Results.Unauthorized();
-            if(!ValidMoney(req.Amount)||req.Amount<=0||req.IdempotencyKey==Guid.Empty)
-                return Results.BadRequest("A positive payment in cents and an idempotency key are required.");
-            await using var c=await connect();await using var tx=await c.BeginTransactionAsync();
+            if(req.IdempotencyKey==Guid.Empty)
+                return Results.BadRequest("An idempotency key is required.");
+            await using var c=await connect();
+            await using var tx=await c.BeginTransactionAsync();
             await LockKey(c,(NpgsqlTransaction)tx,req.IdempotencyKey);
-            await using(var duplicate=new NpgsqlCommand("SELECT repair_id,amount,store_id FROM repair_payments WHERE request_key=@key",c,tx)){
-                duplicate.Parameters.AddWithValue("key",req.IdempotencyKey);
-                await using var reader=await duplicate.ExecuteReaderAsync();
-                if(await reader.ReadAsync()){
-                    if(reader.GetString(2)!=who.Value.store)return Results.NotFound();
-                    return reader.GetInt64(0)==id&&reader.GetDecimal(1)==req.Amount
-                        ?Results.Ok(new{duplicate=true}):Results.Conflict("Idempotency key is already used.");
-                }
-            }
-            decimal quote,paid;
-            string status;
-            await using(var lockRepair=new NpgsqlCommand("""
-                SELECT quoted_total,paid_upfront,status FROM repair_tickets
-                WHERE id=@id AND store_id=@store FOR UPDATE
+            // Locking the repair serializes pickup with status and inventory changes.
+            string status;decimal quote,deposit;DateTime? priorPickup;Guid? priorKey;
+            await using(var get=new NpgsqlCommand("""
+                SELECT status,quoted_total,paid_upfront,picked_up_at,pickup_request_key
+                FROM repair_tickets WHERE id=@id AND store_id=@store FOR UPDATE
                 """,c,tx)){
-                lockRepair.Parameters.AddWithValue("id",id);lockRepair.Parameters.AddWithValue("store",who.Value.store);
-                await using var r=await lockRepair.ExecuteReaderAsync();
-                if(!await r.ReadAsync())return Results.NotFound();
-                quote=r.GetDecimal(0);paid=r.GetDecimal(1);status=r.GetString(2);
+                get.Parameters.AddWithValue("id",id);get.Parameters.AddWithValue("store",who.Value.store);
+                await using var reader=await get.ExecuteReaderAsync();
+                if(!await reader.ReadAsync())return Results.NotFound();
+                status=reader.GetString(0);quote=reader.GetDecimal(1);deposit=reader.GetDecimal(2);
+                priorPickup=reader.IsDBNull(3)?null:reader.GetDateTime(3);
+                priorKey=reader.IsDBNull(4)?null:reader.GetGuid(4);
             }
-            if(status=="cancelled")return Results.Conflict("Cancelled repair tickets cannot record payments.");
-            await using(var total=new NpgsqlCommand("SELECT COALESCE(sum(amount),0) FROM repair_payments WHERE repair_id=@id",c,tx)){
-                total.Parameters.AddWithValue("id",id);
-                paid+=(decimal)(await total.ExecuteScalarAsync()??0m);
+            if(priorPickup is not null){
+                if(priorKey!=req.IdempotencyKey)return Results.Conflict("This repair has already been paid and picked up.");
+                return Results.Ok(new{duplicate=true,paidAndPickedUp=true,balanceDue=0m,pickedUpAt=priorPickup});
             }
-            if(req.Amount>quote-paid)return Results.BadRequest("Payment exceeds the outstanding quoted balance.");
-            await using(var insert=new NpgsqlCommand("""
-                INSERT INTO repair_payments(repair_id,store_id,amount,employee_id,request_key)
-                VALUES(@id,@store,@amount,@employee,@key)
+            if(status!="completed")return Results.Conflict("Finish the repair before marking it paid and picked up.");
+            decimal earlierPayments;
+            await using(var payments=new NpgsqlCommand("""
+                SELECT COALESCE(SUM(amount),0) FROM repair_payments WHERE repair_id=@id AND store_id=@store
                 """,c,tx)){
-                insert.Parameters.AddWithValue("id",id);
-                insert.Parameters.AddWithValue("store",who.Value.store);
-                insert.Parameters.AddWithValue("amount",req.Amount);
-                insert.Parameters.AddWithValue("employee",who.Value.employee);
-                insert.Parameters.AddWithValue("key",req.IdempotencyKey);
-                await insert.ExecuteNonQueryAsync();
+                payments.Parameters.AddWithValue("id",id);payments.Parameters.AddWithValue("store",who.Value.store);
+                earlierPayments=(decimal)(await payments.ExecuteScalarAsync()??0m);
+            }
+            var remaining=quote-deposit-earlierPayments;
+            if(remaining<0)return Results.Conflict("The recorded payments exceed the quoted total; correct the ticket before pickup.");
+            // For the normal workflow, this is the ONE remaining payment.
+            // Older tickets may already have supplemental payments; settle only the balance.
+            if(remaining>0){
+                await using var payment=new NpgsqlCommand("""
+                    INSERT INTO repair_payments(repair_id,store_id,amount,employee_id,request_key)
+                    VALUES(@id,@store,@amount,@employee,@key)
+                    """,c,tx);
+                payment.Parameters.AddWithValue("id",id);payment.Parameters.AddWithValue("store",who.Value.store);
+                payment.Parameters.AddWithValue("amount",remaining);
+                payment.Parameters.AddWithValue("employee",who.Value.employee);
+                payment.Parameters.AddWithValue("key",req.IdempotencyKey);
+                await payment.ExecuteNonQueryAsync();
+            }
+            await using(var update=new NpgsqlCommand("""
+                UPDATE repair_tickets SET picked_up_at=now(),picked_up_by=@employee,
+                    pickup_request_key=@key,updated_at=now()
+                WHERE id=@id AND store_id=@store
+                RETURNING picked_up_at
+                """,c,tx)){
+                update.Parameters.AddWithValue("id",id);update.Parameters.AddWithValue("store",who.Value.store);
+                update.Parameters.AddWithValue("employee",who.Value.employee);
+                update.Parameters.AddWithValue("key",req.IdempotencyKey);
+                priorPickup=(DateTime?)await update.ExecuteScalarAsync();
             }
             await Event(c,(NpgsqlTransaction)tx,id,who.Value.store,who.Value.employee,
-                "payment",$"Payment recorded: {req.Amount:C}. No payment was processed by Inventory Manager.");
+                "paid_picked_up",$"Remaining {remaining:C} recorded as received; customer pickup confirmed. No payment processed by Inventory Manager.");
             await tx.CommitAsync();
-            return Results.Ok(new{recorded=true,balanceDue=quote-paid-req.Amount});
+            return Results.Ok(new{duplicate=false,paidAndPickedUp=true,recordedPayment=remaining,
+                balanceDue=0m,pickedUpAt=priorPickup});
         });
         app.MapPost("/api/repairs/{id:long}/parts",async (HttpContext ctx,long id,RepairPartRequest req)=>{
             var who=await identity(ctx);if(who is null)return Results.Unauthorized();
@@ -443,6 +470,6 @@ static class RepairQueueEndpoints
 record RepairCreateRequest(string? Device,string? RepairType,decimal QuotedTotal,decimal PaidUpfront,
     string? CustomerName,string? CustomerContact,string? SerialNumber,string? Notes,Guid IdempotencyKey);
 record RepairStatusRequest(string? Status);
-record RepairPaymentRequest(decimal Amount,Guid IdempotencyKey);
+record RepairPickupRequest(Guid IdempotencyKey);
 record RepairPartRequest(Guid? ItemId,string? Code,int Quantity,Guid IdempotencyKey);
 record RepairReturnRequest(Guid IdempotencyKey);
