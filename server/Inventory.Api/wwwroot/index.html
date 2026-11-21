@@ -770,7 +770,18 @@ document.addEventListener('click',async e=>{
   }catch(err){
    toast('Could not update checkout note: '+err.message,true);
    if(cell.isConnected){save.disabled=false;save.textContent='Save note'}
-   if(String(err.message).includes('changed by someone else'))await load();
+   if(String(err.message).includes('changed by someone else')){
+    if(cell.isConnected)cell.outerHTML=noteCellMarkup(entry);
+    await load();
+    const list=$('productHistoryList'),itemId=activeProductHistoryItemId;
+    if(itemId&&list?.isConnected){
+     try{
+      const fresh=await api('items/'+encodeURIComponent(itemId)+'/history');
+      if(!list.isConnected||activeProductHistoryItemId!==itemId)return;
+      productHistoryRows=fresh;list.innerHTML=productHistoryTable(fresh);
+     }catch(reloadErr){toast('History refresh failed: '+reloadErr.message,true)}
+    }
+   }
   }
   return;
  }
