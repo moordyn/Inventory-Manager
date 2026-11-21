@@ -43,7 +43,7 @@
       'void main(){',
       ' vec2 d=uv-point;d.x*=aspect;',
       ' float falloff=exp(-dot(d,d)/max(radius*radius,.000001));',
-      ' frag=texture(target,uv)+vec4(value*falloff,0.0);',
+      ' frag=clamp(texture(target,uv)+vec4(value*falloff,0.0),vec4(-2,-2,-2,0),vec4(2,2,2,1));',
       '}'
     ],
     curl: [
@@ -69,7 +69,7 @@
       ' vec2 grad=vec2(t-b,r-l);',
       ' grad/=length(grad)+.00001;',
       ' float spin=texture(curlField,uv).x;',
-      ' vec2 force=vec2(grad.x,-grad.y)*spin*dt*12.0;',
+      ' vec2 force=vec2(grad.x,-grad.y)*spin*dt*5.5;',
       ' vec2 v=clamp(texture(velocity,uv).xy+force,vec2(-3),vec2(3));',
       ' frag=vec4(v,0,1);',
       '}'
@@ -111,16 +111,25 @@
     ],
     display: [
       'uniform sampler2D dye;',
-      'uniform vec3 baseColor;',
       'uniform float lightMode;',
       'void main(){',
-      ' vec3 ink=max(texture(dye,uv).rgb,vec3(0));',
+      ' uniform vec2 sourceSize;',
+      ' vec4 smoothDye(vec2 p){',
+      '   vec2 coord=p*sourceSize-.5;',
+      '   ivec2 lo=ivec2(floor(coord));vec2 f=fract(coord);',
+      '   ivec2 edge=ivec2(sourceSize)-1;',
+      '   vec3 a=texelFetch(dye,clamp(lo,ivec2(0),edge),0).rgb;',
+      '   vec3 b=texelFetch(dye,clamp(lo+ivec2(1,0),ivec2(0),edge),0).rgb;',
+      '   vec3 c=texelFetch(dye,clamp(lo+ivec2(0,1),ivec2(0),edge),0).rgb;',
+      '   vec3 d=texelFetch(dye,clamp(lo+ivec2(1,1),ivec2(0),edge),0).rgb;',
+      '   return vec4(mix(mix(a,b,f.x),mix(c,d,f.x),f.y),1.0);',
+      ' }',
+      'void main(){',
+      ' vec3 ink=max(smoothDye(uv).rgb,vec3(0));',
       ' float energy=max(ink.r,max(ink.g,ink.b));',
-      ' float strength=1.0-exp(-energy*1.8);',
-      ' vec3 vivid=clamp(ink*(1.6/(energy+.28)),vec3(0),vec3(1));',
-      ' vec3 darkColor=mix(baseColor,vivid,clamp(strength*.96,0.0,.94));',
-      ' vec3 lightColor=mix(baseColor,vivid*.63+baseColor*.25,clamp(strength*.80,0.0,.80));',
-      ' frag=vec4(mix(darkColor,lightColor,lightMode),1);',
+      ' float alpha=clamp((1.0-exp(-energy*1.7))*(lightMode>.5?.46:.68),0.0,.72);',
+      ' vec3 color=clamp(ink/(energy+.08),vec3(0),vec3(1));',
+      ' frag=vec4(color,alpha);',
       '}'
     ]
   };
@@ -135,12 +144,11 @@
   }
   function create(canvas,root) {
     const reduce=window.matchMedia('(prefers-reduced-motion: reduce)');
-    const gl=canvas.getContext('webgl2',{alpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:false,powerPreference:'low-power'});
-    let ready=false,active=false,raf=0,last=0,width=0,height=0,simW=0,simH=0,dyeW=0,dyeH=0,base=[.08,.10,.15],colors=[],pointer=null,queue=[],step=0,ambient=0;
+    const gl=canvas.getContext('webgl2',{alpha:true,premultipliedAlpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:false,powerPreference:'low-power'});
+    let ready=false,active=false,raf=0,last=0,width=0,height=0,simW=0,simH=0,dyeW=0,dyeH=0,colors=[],pointer=null,queue=[],step=0,gestureInk=0,lastSample=0;
     let targets=null,programs=null;
     function theme(){
       const css=getComputedStyle(document.body);
-      base=hexColor(css.getPropertyValue('--bg'));
       const a=hexColor(css.getPropertyValue('--accent'));
       const b=hexColor(css.getPropertyValue('--active-border'));
       const c=hexColor(css.getPropertyValue('--muted'));
@@ -159,7 +167,7 @@
       };
       const chosen=inkColors[document.body.dataset.theme];
       colors=chosen?chosen.map(hexColor):[richer(a,1.1),richer(b,1.45),richer(c,1.32)];
-      if(targets){clearTargets();seed();}
+      if(targets)clearTargets();
     }
     if(gl && gl.getExtension('EXT_color_buffer_float')) {
       try{
@@ -219,12 +227,13 @@
       const bounds=canvas.getBoundingClientRect();
       width=bounds.width;height=bounds.height;
       if(width<1||height<1)return;
-      const dpr=Math.min(window.devicePixelRatio||1,1.25);
+      const dpr=Math.min(window.devicePixelRatio||1,2);
       canvas.width=Math.max(1,Math.round(width*dpr));canvas.height=Math.max(1,Math.round(height*dpr));
       const ratio=width/height;
       const compact=Math.min(width,height)<600;
-      simH=compact?100:160;simW=Math.max(60,Math.round(simH*ratio));
-      dyeH=compact?240:360;dyeW=Math.max(100,Math.min(700,Math.round(dyeH*ratio)));
+      simH=compact?118:180;simW=Math.max(60,Math.round(simH*ratio));
+      // Higher-resolution dye improves edge fidelity without full-resolution pressure solve.
+      dyeH=compact?440:720;dyeW=Math.max(150,Math.min(1280,Math.round(dyeH*ratio)));
       cleanup();
       try{
         targets={
@@ -232,7 +241,7 @@
           pressure:pair(simW,simH),
           divergence:frameBuffer(simW,simH),curl:frameBuffer(simW,simH)
         };
-        clearTargets();seed();
+        clearTargets();
       }catch(err){
         console.warn('Login fluid unavailable on this GPU',err);
         cleanup();ready=false;canvas.style.display='none';
@@ -267,33 +276,40 @@
       pass('splat',targets.dye.b,{target:targets.dye.a},{point,value:col,radius:radius*1.5,aspect});
       targets.dye.swap();
     }
-    function seed(){
-      if(!targets)return;
-      // The page begins with theme-colored smoke, not a black/empty field.
-      const locations=[[.19,.25],[.77,.72],[.62,.23],[.30,.80],[.54,.53]];
-      locations.forEach((p,i)=>splat(p[0],p[1],(.45-i*.15),(.18-i*.07),colors[i%colors.length].map(v=>v*.6),.16));
-    }
+
     function motion(event){
       if(!active||reduce.matches||!targets)return;
+      // Only a deliberate drag paints dye. Ordinary mouse movement doesn't flood the page.
+      const dragging=event.pointerType==='mouse'?(event.buttons&1)!==0:
+                     (event.pointerType==='pen'?(event.buttons&1)!==0:pointer?.id===event.pointerId);
+      if(!dragging){pointer=null;return;}
       const bounds=root.getBoundingClientRect();
       if(!bounds.width||!bounds.height)return;
       const next={x:Math.max(0,Math.min(1,(event.clientX-bounds.left)/bounds.width)),
                   y:Math.max(0,Math.min(1,1-(event.clientY-bounds.top)/bounds.height)),id:event.pointerId};
-      if(pointer && pointer.id===next.id){
-        const dx=next.x-pointer.x,dy=next.y-pointer.y;
-        if(Math.hypot(dx,dy)>.001){
-          const count=Math.min(6,Math.max(1,Math.ceil(Math.hypot(dx*width,dy*height)/35)));
-          for(let j=1;j<=count;j++){
-            queue.push({x:pointer.x+dx*j/count,y:pointer.y+dy*j/count,
-                        vx:Math.max(-2,Math.min(2,dx*17)),vy:Math.max(-2,Math.min(2,dy*17)),
-                        color:colors[(step+j)%colors.length]});
-          }
-          if(queue.length>45)queue.splice(0,queue.length-45);
-        }
-      }else{
-        queue.push({x:next.x,y:next.y,vx:0,vy:0,color:colors[step%colors.length].map(v=>v*.24)});
-      }
+      if(!pointer||pointer.id!==next.id){pointer=next;gestureInk=0;lastSample=0;return;}
+      const dx=next.x-pointer.x,dy=next.y-pointer.y;
+      const dist=Math.hypot(dx*width,dy*height);
+      const now=performance.now();
+      if(dist<7||now-lastSample<24){return;}
+      // Cap ink per gesture and splats per frame: no full-screen saturation on long drags.
+      const amount=Math.min(dist,70);
+      if(gestureInk>=1.8){pointer=next;return;}
+      const fraction=Math.min(.15,amount/380,1.8-gestureInk);
+      gestureInk+=fraction;lastSample=now;
+      const strength=Math.min(1.3,dist/80);
+      queue.push({x:next.x,y:next.y,
+                  vx:Math.max(-.65,Math.min(.65,dx*5))*strength,
+                  vy:Math.max(-.65,Math.min(.65,dy*5))*strength,
+                  color:colors[(Math.floor(gestureInk*8)+step)%colors.length].map(v=>v*fraction)});
+      if(queue.length>8)queue.shift();
       pointer=next;
+    }
+    function beginDrag(event){
+      if(event.pointerType==='mouse'&&event.button!==0)return;
+      const bounds=root.getBoundingClientRect();
+      pointer={id:event.pointerId,x:(event.clientX-bounds.left)/bounds.width,y:1-(event.clientY-bounds.top)/bounds.height};
+      gestureInk=0;lastSample=0;
     }
     function forget(event){if(!event || !pointer || event.pointerId===pointer.id)pointer=null;}
     function simulate(now){
@@ -307,21 +323,15 @@
       const vel=targets.velocity,dye=targets.dye,pressure=targets.pressure,texel=[1/simW,1/simH];
       gl.disable(gl.BLEND);
       // Semi-Lagrangian transport; manual bilinear sampling supports GPUs without float-linear filtering.
-      pass('advect',vel.b,{velocity:vel.a,source:vel.a},{sourceSize:[simW,simH],dt,fade:.994});
+      pass('advect',vel.b,{velocity:vel.a,source:vel.a},{sourceSize:[simW,simH],dt,fade:.965});
       vel.swap();
-      pass('advect',dye.b,{velocity:vel.a,source:dye.a},{sourceSize:[dyeW,dyeH],dt,fade:.992});
+      pass('advect',dye.b,{velocity:vel.a,source:dye.a},{sourceSize:[dyeW,dyeH],dt,fade:.975});
       dye.swap();
-      for(let i=0;i<Math.min(queue.length,10);i++){
+      for(let i=0;i<Math.min(queue.length,3);i++){
         const q=queue.shift();
-        splat(q.x,q.y,q.vx,q.vy,q.color.map(v=>v*.68),.065);
+        splat(q.x,q.y,q.vx,q.vy,q.color,.028);
       }
-      // Gentle automatic drift keeps the page alive before the first pointer movement.
-      if(now-ambient>1150){
-        ambient=now;
-        const t=now*.00024;
-        const x=.5+Math.sin(t*1.1)*.31,y=.5+Math.cos(t*.79)*.3;
-        splat(x,y,Math.cos(t)*.18,Math.sin(t*1.2)*.18,colors[step%3].map(v=>v*.13),.11);
-      }
+      // No periodic dye injection: the fluid settles instead of taking over the page.
       pass('curl',targets.curl,{velocity:vel.a},{stepSize:texel});
       pass('vorticity',vel.b,{velocity:vel.a,curlField:targets.curl},{stepSize:texel,dt});
       vel.swap();
@@ -332,10 +342,10 @@
       }
       pass('subtract',vel.b,{pressureField:pressure.a,velocity:vel.a},{stepSize:texel});
       vel.swap();
-      pass('display',null,{dye:dye.a},{baseColor:base,lightMode:document.body.dataset.theme==='glacier'?1:0});
+      pass('display',null,{dye:dye.a},{sourceSize:[dyeW,dyeH],lightMode:document.body.dataset.theme==='glacier'?1:0});
     }
     function stop(){
-      active=false;cancelAnimationFrame(raf);raf=0;last=0;pointer=null;queue=[];
+      active=false;cancelAnimationFrame(raf);raf=0;last=0;pointer=null;queue=[];gestureInk=0;
     }
     function start(){
       stop();theme();
@@ -344,7 +354,7 @@
       active=true;raf=requestAnimationFrame(simulate);
     }
     root.addEventListener('pointermove',motion,{passive:true});
-    root.addEventListener('pointerdown',motion,{passive:true});
+    root.addEventListener('pointerdown',beginDrag,{passive:true});
     root.addEventListener('pointerleave',forget,{passive:true});
     root.addEventListener('pointerup',forget,{passive:true});
     root.addEventListener('pointercancel',forget,{passive:true});
