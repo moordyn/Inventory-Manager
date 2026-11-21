@@ -536,6 +536,46 @@ body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srg
   #app.shell{background:radial-gradient(ellipse 60% 50% at 80% 15%,var(--glow),transparent 80%)}
 }
 
+
+/* Repair queue uses theme palette tokens, preserving all ten variants. */
+.repair-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:14px}
+.repair-toolbar>input{flex:1 1 250px;width:auto}
+.repair-history-toggle{display:flex;align-items:center;gap:9px;margin:0;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--raised);color:var(--text);font-size:12px}
+.repair-history-toggle input{flex:none}
+.repair-list{display:grid;gap:12px;margin-top:15px}
+.repair-ticket{padding:17px;border:1px solid var(--line);border-radius:13px;background:var(--raised);overflow-wrap:anywhere}
+.repair-ticket-head{display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px}
+.repair-ticket h3{font-size:16px}
+.repair-ticket-meta{color:var(--muted);font-size:12px;margin-top:4px}
+.repair-ticket-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}
+.repair-ticket-summary>div{min-width:0}
+.repair-ticket-summary small{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.4px}
+.repair-ticket-summary strong{font-size:15px;font-variant-numeric:tabular-nums}
+.repair-ticket-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.repair-ticket-status{display:inline-flex;align-items:center;padding:5px 9px;border:1px solid var(--active-border);border-radius:8px;background:var(--active);color:var(--text);font-size:11px;font-weight:750}
+.repair-detail-info{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:15px}
+.repair-detail-info>div{padding:10px 12px;border-radius:10px;background:var(--panel);min-width:0;overflow-wrap:anywhere}
+.repair-detail-info small{display:block;margin-bottom:3px}
+.repair-details-section{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.repair-detail-list{display:grid;gap:7px;margin:10px 0}
+.repair-detail-line{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:9px;background:var(--panel);font-size:12px}
+.repair-detail-line .btn{min-height:32px;padding:5px 9px;font-size:11px}
+.repair-inline-control{display:flex;align-items:end;gap:9px;flex-wrap:wrap;margin-top:10px}
+.repair-inline-control>div{flex:1 1 140px;min-width:0}
+.repair-inline-control label{margin-top:5px}
+.repair-inline-control>.btn{flex:0 0 auto}
+.repair-muted{font-size:11px;color:var(--muted);margin-top:6px}
+.repair-payments{display:grid;gap:5px;padding:8px 0;color:var(--muted);font-size:12px}
+.repair-events{max-height:220px;overflow-y:auto;display:grid;gap:8px;margin-top:10px}
+.repair-events>div{padding:9px;border-left:2px solid var(--active-border);background:var(--panel);border-radius:4px;font-size:12px}
+@media(max-width:760px){
+ .repair-ticket-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .mobile-nav{justify-content:flex-start;overflow-x:auto;scrollbar-width:none}
+ .mobile-nav::-webkit-scrollbar{display:none}
+ .mobile-nav button{flex:1 0 51px}
+}
+@media(max-width:390px){.repair-inline-control>.btn{width:100%}}
+
 </style></head><body data-theme="mint">
 <div id="auth" class="login-screen"><canvas id="loginAurora" class="login-aurora" aria-hidden="true"></canvas><div class="card login-card"><div class="brand brand-login"><img class="brand-wordmark brand-wordmark-login" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async" fetchpriority="high"></div><div id="setup" class="hidden">
  <h1>Set up your administrator account</h1>
@@ -598,7 +638,7 @@ body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srg
  </form>
  <p style="margin-top:15px"><button class="btn ghost" type="button" data-back-to-signin>Back to sign in</button></p>
 </div><div id="authLoading" class="muted" style="padding:12px 0" role="status">Connecting to the inventory server…</div><div id="authMsg" class="message" role="status" aria-live="polite"></div></div></div>
-<div id="app" class="shell hidden"><canvas id="appAurora" class="app-aurora" aria-hidden="true"></canvas><aside class="sidebar"><div class="brand brand-sidebar"><img class="brand-wordmark brand-wordmark-sidebar" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async"><div id="locationBrand" class="brand-location">Store location</div></div><nav class="nav" id="sideNav" aria-label="Main navigation"><button data-page="overview" class="active"><span>▦</span> Overview</button><button data-page="inventory"><span>▤</span> Inventory</button><button data-page="checkin"><span>↙</span> Check In</button><button data-page="checkout"><span>↗</span> Check Out</button><button data-page="history"><span>◷</span> History</button><button data-page="settings"><span>⚙</span> Settings</button><button data-page="administration" id="adminNav" class="hidden"><span>♙</span> Administration</button></nav><div class="sidebar-foot"><div style="color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">Signed in as</div><div id="signedInEmployee" style="font-size:15px;font-weight:700;color:#f0f2f5;overflow-wrap:anywhere;margin-top:4px">—</div><div id="signedInEmployeeId" style="margin-top:3px">—</div><button type="button" class="btn warn" id="sidebarLogoutBtn" style="width:100%;margin-top:12px">Sign out</button><div style="margin-top:16px">ZAGG Inventory Manager · Secure inventory access</div></div></aside>
+<div id="app" class="shell hidden"><canvas id="appAurora" class="app-aurora" aria-hidden="true"></canvas><aside class="sidebar"><div class="brand brand-sidebar"><img class="brand-wordmark brand-wordmark-sidebar" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async"><div id="locationBrand" class="brand-location">Store location</div></div><nav class="nav" id="sideNav" aria-label="Main navigation"><button data-page="overview" class="active"><span>▦</span> Overview</button><button data-page="inventory"><span>▤</span> Inventory</button><button data-page="checkin"><span>↙</span> Check In</button><button data-page="checkout"><span>↗</span> Check Out</button><button data-page="repairs"><span>🛠</span> Repair Queue</button><button data-page="history"><span>◷</span> History</button><button data-page="settings"><span>⚙</span> Settings</button><button data-page="administration" id="adminNav" class="hidden"><span>♙</span> Administration</button></nav><div class="sidebar-foot"><div style="color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">Signed in as</div><div id="signedInEmployee" style="font-size:15px;font-weight:700;color:#f0f2f5;overflow-wrap:anywhere;margin-top:4px">—</div><div id="signedInEmployeeId" style="margin-top:3px">—</div><button type="button" class="btn warn" id="sidebarLogoutBtn" style="width:100%;margin-top:12px">Sign out</button><div style="margin-top:16px">ZAGG Inventory Manager · Secure inventory access</div></div></aside>
 <main class="content"><div class="mobile-account"><div class="mobile-account-identity"><img class="brand-wordmark brand-wordmark-mobile" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async"><div class="mobile-account-details"><div id="mobileEmployeeName" style="font-weight:700">Employee</div><div id="mobileLocationName" class="muted" style="font-size:12px">Store</div></div></div><div class="mobile-account-actions"><button type="button" class="btn" data-page="settings" aria-label="Settings">Settings</button><button type="button" class="btn warn" id="mobileLogoutBtn">Sign out</button></div></div><div id="storePickerWrap" class="hidden" style="margin-bottom:16px"><label for="storePicker">Current store location</label><select id="storePicker" aria-label="Select store location"></select></div><header class="topbar"><div><div class="eyebrow">INVENTORY MANAGEMENT</div><h1 id="pageTitle">Overview</h1></div><div class="status" id="status">● Connected</div></header>
 <div class="toolbar" id="mainToolbar"><input class="search" id="globalScan" placeholder="⌕  Search items or scan barcode..." aria-label="Search or scan barcode"><button class="btn" id="cameraBtn">▣ Camera scan</button><button class="btn primary" id="newItemBtn">＋ Add item</button></div>
 <div class="view active" id="view-overview"><div class="grid stats"><div class="card"><div class="stat-label">Total products</div><div class="stat-num" id="statProducts">—</div><div class="stat-sub">Registered SKUs</div></div><div class="card"><div class="stat-label">Units in stock</div><div class="stat-num" id="statUnits">—</div><div class="stat-sub">Across all products</div></div><div class="card"><div class="stat-label">Low stock alerts</div><button class="stat-num stat-num-button amber" id="statLow" type="button" data-go="reorder" aria-label="Open low-stock reorder list">—</button><div class="stat-sub">Select count for reorder list</div></div><div class="card"><div class="stat-label">Inventory value</div><div class="stat-num" id="statValue">—</div><div class="stat-sub">Based on unit cost</div></div></div><div class="grid split"><section class="card"><div class="section-head"><div><h2>Recent inventory</h2><p>Your products at a glance</p></div><button class="btn ghost" data-go="inventory">View all →</button></div><div id="recentItems"></div></section><section class="grid action-grid"><div class="card action"><div><div class="action-icon">↙</div><h2>Check In</h2><p>Add received products to your inventory.</p></div><button class="btn primary" data-go="checkin">Check in items →</button></div><div class="card action"><div><div class="action-icon">↗</div><h2>Check Out</h2><p>Record products removed from stock.</p></div><button class="btn" data-go="checkout">Check out items →</button></div></section></div><section class="card" style="margin-top:20px"><div class="section-head"><h2>Recent activity</h2><button class="btn ghost" data-go="history">View history →</button></div><div id="recentHistory"></div></section></div>
@@ -610,6 +650,14 @@ body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srg
 </section></div>
 <div class="view" id="view-checkin"><section class="card"><h2>Receive inventory</h2><p class="muted">Scan a barcode or choose a product to add stock.</p><form id="checkinForm"><label for="checkinItem">Product</label><select id="checkinItem" required></select><label for="checkinQty">Quantity to add</label><input id="checkinQty" type="number" min="1" step="1" value="1" required><label for="checkinNote">Note (optional)</label><input id="checkinNote" placeholder="Supplier, delivery reference, etc."><div class="modal-actions"><button class="btn primary">＋ Confirm check in</button></div></form></section></div>
 <div class="view" id="view-checkout"><section class="card"><h2>Remove inventory</h2><p class="muted">Scan a barcode or choose a product to deduct stock.</p><form id="checkoutForm"><label for="checkoutItem">Product</label><select id="checkoutItem" required></select><label for="checkoutQty">Quantity to remove</label><input id="checkoutQty" type="number" min="1" step="1" value="1" required><label for="checkoutNote">Checkout reason (required)</label><input id="checkoutNote" required placeholder="Order, reason, etc."><div class="modal-actions"><button class="btn primary">− Confirm check out</button></div></form></section></div>
+<div class="view" id="view-repairs">
+ <section class="card repair-queue-page">
+  <div class="section-head"><div><h2>Repair Queue</h2><p>Oldest checked-in repair first. Scanned parts deduct stock at this location.</p></div><button type="button" class="btn primary" id="repairNewBtn">＋ Check in repair</button></div>
+  <div class="repair-toolbar"><input id="repairSearch" aria-label="Search repair tickets" placeholder="Search ticket, device, repair type, customer…" autocomplete="off"><label for="repairShowHistory" class="repair-history-toggle"><input type="checkbox" id="repairShowHistory"> Completed &amp; cancelled</label></div>
+  <p id="repairQueueSummary" class="muted" role="status" aria-live="polite">Open this page to load repairs.</p>
+  <div id="repairQueueList" class="repair-list"><div class="empty">No repairs checked in yet.</div></div>
+ </section>
+</div>
 <div class="view" id="view-history"><section class="card"><div class="section-head"><div><h2>Transaction history</h2><p>Every recorded stock movement</p></div><button class="btn" id="exportBtn">↓ Export CSV</button></div><div id="historyTable" class="table-wrap"></div></section></div>
 <div class="view" id="view-administration">
 <section class="card hidden" id="loginThemePanel" style="margin-bottom:18px">
@@ -711,7 +759,7 @@ body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srg
  <label for="changeEmailPassword">Current password</label><input type="password" id="changeEmailPassword" required autocomplete="current-password">
  <button type="submit" class="btn primary" style="margin-top:14px">Send confirmation link</button>
 </form><p class="muted" style="margin-top:12px">You are signed out after 15 minutes without activity. No countdown is displayed.</p></section><section class="card" style="margin-top:18px"><h2>Server settings</h2><p class="muted" style="margin:12px 0">All inventory is stored centrally on this server. An internet connection is required.</p><p>Server: <strong id="serverHost"></strong></p><p style="margin-top:16px"><button class="btn" id="refreshBtn">↻ Refresh data</button> <button class="btn warn" id="logoutBtn">Sign out</button></p><p class="muted" style="margin-top:16px">Employee access uses individual passwords. Automatic sign-out occurs after 15 minutes of inactivity. Database backups are managed by the server.</p></section></div>
-</main><nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation"><button data-page="overview" class="active"><span>▦</span>Home</button><button data-page="inventory"><span>▤</span>Items</button><button data-page="checkin"><span>↙</span>In</button><button data-page="checkout"><span>↗</span>Out</button><button data-page="history"><span>◷</span>History</button><button data-page="administration" id="mobileAdminNav" class="hidden"><span>♙</span>Admin</button></nav></div>
+</main><nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation"><button data-page="overview" class="active"><span>▦</span>Home</button><button data-page="inventory"><span>▤</span>Items</button><button data-page="checkin"><span>↙</span>In</button><button data-page="checkout"><span>↗</span>Out</button><button data-page="repairs"><span>🛠</span>Repairs</button><button data-page="history"><span>◷</span>History</button><button data-page="administration" id="mobileAdminNav" class="hidden"><span>♙</span>Admin</button></nav></div>
 <div id="modalRoot"></div><div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 <script>
 'use strict';
@@ -996,7 +1044,7 @@ function logout(send=true){
  if($('modalRoot').firstElementChild)closeModal();
  if(idleTimer!==null){clearInterval(idleTimer);idleTimer=null;}
  if(send&&token)api('auth/logout','POST').catch(()=>{});
- token='';identity=null;allowedStores=[];items=[];history=[];productHistoryRows=[];activeProductHistoryItemId=null;reorderRows=[];
+ token='';identity=null;allowedStores=[];items=[];history=[];productHistoryRows=[];activeProductHistoryItemId=null;reorderRows=[];window.RepairQueue?.reset();
  $('recentHistory').innerHTML='';$('historyTable').innerHTML='';
  sessionStorage.removeItem('inventory-token');
  $('app').classList.add('hidden');$('auth').classList.remove('hidden');
@@ -1145,9 +1193,10 @@ function navigate(next){
    el.classList.toggle('active',active);
    if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');
  });
- $('pageTitle').textContent=({overview:'Overview',inventory:'Inventory',checkin:'Check In',checkout:'Check Out',history:'History',reorder:'Reorder List',settings:'Settings',administration:'Administration'})[next]||next;
+ $('pageTitle').textContent=({overview:'Overview',inventory:'Inventory',checkin:'Check In',checkout:'Check Out',history:'History',repairs:'Repair Queue',reorder:'Reorder List',settings:'Settings',administration:'Administration'})[next]||next;
  if(next==='administration')loadAdmin();
  if(next==='reorder')loadReorder();
+  if(next==='repairs')window.RepairQueue?.open();
  window.scrollTo({top:0,behavior:'smooth'});
  render();
 }
@@ -1474,7 +1523,7 @@ document.addEventListener('click',e=>{
 });
 $('newItemBtn').onclick=()=>openItem();$('logoutBtn').onclick=()=>logout();$('sidebarLogoutBtn').onclick=()=>logout();$('mobileLogoutBtn').onclick=()=>logout();$('refreshBtn').onclick=load;
 $('exportBtn').onclick=()=>{const rows=[['ID','Store','Employee','SKU','Name','Change','Before','After','Timestamp','Note'],...history.map(x=>[x.id,x.storeId||'',x.employeeId||'LEGACY',x.sku,x.name,x.delta,x.before,x.after,x.time,x.note||''])];const csv=rows.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='inventory-history.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
-async function scanResult(code){$('globalScan').value=code;const found=items.find(x=>x.sku.toLowerCase()===code.toLowerCase()||x.barcode?.toLowerCase()===code.toLowerCase());if(found){openMovement(found)}else{try{const remote=await api('items/lookup/'+encodeURIComponent(code));openMovement(items.find(x=>x.id===remote.id)||remote)}catch{openItem(null,code)}}}
+async function scanResult(code){if(window.RepairQueue?.handleCameraScan(code))return;$('globalScan').value=code;const found=items.find(x=>x.sku.toLowerCase()===code.toLowerCase()||x.barcode?.toLowerCase()===code.toLowerCase());if(found){openMovement(found)}else{try{const remote=await api('items/lookup/'+encodeURIComponent(code));openMovement(items.find(x=>x.id===remote.id)||remote)}catch{openItem(null,code)}}}
 // BarcodeDetector is hardware-accelerated where supported; ZXing is our Safari fallback.
 // Warm the fallback module before opening the camera when a browser has no native detector.
 $('cameraBtn').addEventListener('pointerenter',()=>{
@@ -1909,7 +1958,8 @@ const navIconPaths={
  inventory:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 10v10"/>',
  checkin:'<path d="M12 3v12m0 0-4-4m4 4 4-4M5 18v3h14v-3"/>',
  checkout:'<path d="M12 18V6m0 0-4 4m4-4 4 4M5 21h14"/>',
- history:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+ repairs:'<path d="M5 5h5l2 2-3 3-2-2-3 3 3 3 6-6"/><path d="M15 3a5 5 0 0 0 6 6l-8 8-3-3 8-8a5 5 0 0 0-3-3"/>',
+  history:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
  settings:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2.2 2.2M16.8 16.8 19 19M19 5l-2.2 2.2M7.2 16.8 5 19"/>',
  administration:'<path d="M12 2 4 5v7c0 5 3 8 8 10 5-2 8-5 8-10V5z"/><path d="m9 12 2 2 4-4"/>'
 };
@@ -1918,4 +1968,4 @@ document.querySelectorAll('#sideNav button[data-page],#mobileNav button[data-pag
  if(span&&path)span.innerHTML='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+path+'</svg>';
 });
 window.addEventListener('online',()=>{if(token&&!activeScannerStop)load()});setInterval(()=>{if(token&&!document.hidden&&!activeScannerStop)load()},20000);initialize();
-</script></body></html>
+</script><script src="/assets/repair-queue.js?v=1"></script></body></html>
