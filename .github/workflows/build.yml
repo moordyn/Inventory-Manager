@@ -27,5 +27,27 @@ jobs:
           const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]));
           const missing = [...html.matchAll(/\$\('([^']+)'\)/g)].map(m=>m[1]).filter(id=>!ids.has(id));
           if (missing.length) throw new Error('Missing element IDs: '+[...new Set(missing)].join(', '));
-          console.log('Frontend syntax and DOM reference checks passed');
+          const allIds = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
+          if (new Set(allIds).size !== allIds.length) throw new Error('Duplicate HTML element IDs');
+          const stylesheet = html.match(/<style>([\s\S]*?)<\/style>/);
+          if (!stylesheet) throw new Error('Application stylesheet missing');
+          let depth = 0;
+          for (const ch of stylesheet[1]) {
+            if (ch === '{') depth++;
+            if (ch === '}') depth--;
+            if (depth < 0) throw new Error('CSS has an unmatched closing brace');
+          }
+          if (depth !== 0) throw new Error('CSS has unmatched opening braces');
+          for (const required of [
+            'class="mobile-nav"', 'id="mainToolbar"', 'id="inventoryCount"',
+            'scanner-preview', 'scanner-target', 'scannerTorch',
+            'decodeFromVideoElement(video', 'delayBetweenScanAttempts:80',
+            'if(activeScannerStop)activeScannerStop()', 'role="dialog"'
+          ]) {
+            if (!html.includes(required)) throw new Error('UI feature missing: ' + required);
+          }
+          if (html.includes('decodeFromConstraints({audio:false')) {
+            throw new Error('Barcode scanner must reuse its first camera stream');
+          }
+          console.log('Frontend syntax, responsive layout and barcode-scanner checks passed');
           NODE
