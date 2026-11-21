@@ -40,10 +40,18 @@ No employee accounts, invoicing, accounting or offline edits in v1.
 
 Store administrators can configure email alerts for **their own store** in **Administration → Low-stock email alerts**. Each store has its own connected Google sending account and up to 10 recipient addresses. Global admins can switch to another store and manage its alerts. Notifications are generated on stock changes at or below the product's minimum and sent once per low-stock cycle; a restock above the minimum rearms the next alert.
 
+### Dashboard JSON import (recommended for global administrators)
+
+After deploying the latest version using `cd /opt/inventory-manager && bash deploy/install.sh`, sign in with the global administrator PIN and open **Administration → Google OAuth configuration**. Upload the **Web application OAuth Client JSON** downloaded from Google Cloud, enter the global administrator PIN again, and click **Import Google configuration**.
+
+The API checks the client type, Client ID, Client Secret, authorized origin (`https://inv.mrmschf.xyz`) and callback URL (`https://inv.mrmschf.xyz/api/google/callback`). The secret is encrypted using the persistent `GOOGLE_TOKEN_KEY` on the Ubuntu server, stored in PostgreSQL, and activated immediately **without a restart**. The interface shows the Client ID and configuration status, never the Client Secret. Only PIN-authenticated global administrators can import or replace this application-wide configuration. Store administrators retain their own per-store Gmail connections and recipient settings.
+
+**No manual copying of JSON or OAuth credentials to the server is needed for this method.** The installer must be run at least once to create and preserve the server encryption key. Back up both the database and the private `.env` encryption key so restored Gmail connections remain usable. If changing to a different OAuth Client ID, existing per-store Google senders must be disconnected first.
+
 ### Google OAuth setup (recommended)
 
 1. In Google Cloud, enable **Gmail API** and set up an OAuth **Web application** with the **Gmail Send** scope (`https://www.googleapis.com/auth/gmail.send`). Use the authorized origin `https://inv.mrmschf.xyz` and redirect URI `https://inv.mrmschf.xyz/api/google/callback`.
-2. Keep the downloaded Google OAuth client JSON **private**. Transfer it securely to your Ubuntu server (e.g. root's home directory); **never put it in GitHub, upload it to the publicly served app, or copy it to the Docker image**.
+2. **Alternative manual setup only:** Keep the downloaded Google OAuth client JSON **private**. Transfer it securely to your Ubuntu server (e.g. root's home directory); **never put it in GitHub, upload it to the publicly served app, or copy it to the Docker image**.
 3. On the Ubuntu server, run the installer/update first and then import that JSON:
 
    ```bash
