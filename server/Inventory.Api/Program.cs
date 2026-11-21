@@ -723,7 +723,10 @@ app.MapPut("/api/admin/employees/{id}/id",async (HttpContext ctx,string id,Chang
         ("movements","note_updated_by"),("movement_note_edits","changed_by"),
         ("items","deleted_by"),("auth_email_tokens","employee_id"),
         ("google_oauth_states","employee_id"),("google_oauth_config","configured_by"),
-        ("google_store_accounts","connected_by"),("global_google_sender","connected_by")
+        ("google_store_accounts","connected_by"),("global_google_sender","connected_by"),
+        ("repair_tickets","created_by"),("repair_tickets","assigned_to"),
+        ("repair_parts","scanned_by"),("repair_parts","returned_by"),
+        ("repair_payments","employee_id"),("repair_events","employee_id")
     }){
         await using var cmd=new NpgsqlCommand($"UPDATE {table} SET {column}=@new WHERE {column}=@old",c,tx);
         cmd.Parameters.AddWithValue("new",newId);cmd.Parameters.AddWithValue("old",id);
