@@ -275,6 +275,170 @@ app.MapPost("/api/auth/activity",async (HttpContext ctx)=>{
     cmd.Parameters.AddWithValue("hash",Hash(bearer));
     return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{renewed=true}):Results.Unauthorized();
 });
+// Self-service employee activation: the administrator only creates the employee ID.
+// Email possession is proven by one single-use link before credentials become active.
+app.MapPost("/api/auth/start-activation",async (HttpContext ctx,ActivateAccount req)=>{
+    if(!Regex.IsMatch(req.EmployeeId??"", @"^[A-Za-z0-9_-]{2,24}$"))
+        return Results.BadRequest("Enter a valid employee ID.");
+    if(!EmailPairValid(req.Email,req.ConfirmEmail))
+        return Results.BadRequest("Email addresses must both be valid and match.");
+    if(!PasswordValid(req.Password)||req.Password!=req.ConfirmPassword)
+        return Results.BadRequest("Passwords must match and contain 8+ characters, uppercase, lowercase, a number and a symbol.");
+    if(!await AccountMailReady())return Results.Problem("An administrator must connect a company Gmail or SMTP sender before staff can activate their accounts.",statusCode:503);
+    var email=req.Email!.Trim().ToLowerInvariant();
+    await using var c=await Connect();
+    await using var tx=await c.BeginTransactionAsync();
+    await using var find=new NpgsqlCommand("""
+        SELECT password_hash,global_admin FROM employees
+        WHERE id=@id AND active AND EXISTS(SELECT 1 FROM employee_store_access WHERE employee_id=@id)
+        FOR UPDATE
+        """,c,tx);
+    find.Parameters.AddWithValue("id",req.EmployeeId!);
+    string? currentHash=null;bool isGlobal=false,found=false;
+    await using(var r=await find.ExecuteReaderAsync()){
+        if(await r.ReadAsync()){found=true;currentHash=r.IsDBNull(0)?null:r.GetString(0);isGlobal=r.GetBoolean(1);}
+    }
+    if(!found)return Results.BadRequest("This employee ID is unavailable. Contact your administrator.");
+    if(isGlobal&&req.EmployeeId=="OWNER")return Results.BadRequest("The original OWNER must complete installation-token setup first.");
+    if(currentHash is not null)return Results.Conflict("This account is already active. Use Forgot password instead.");
+    await using(var dup=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE lower(email)=@email AND id<>@id)",c,tx)){
+        dup.Parameters.AddWithValue("email",email);dup.Parameters.AddWithValue("id",req.EmployeeId!);
+        if((bool)(await dup.ExecuteScalarAsync()??false))return Results.Conflict("That email address is already associated with another employee.");
+    }
+    string raw;
+    try{raw=await CreateAccountEmailToken(c,(NpgsqlTransaction)tx,req.EmployeeId!,email,"activate",PasswordHash(req.Password!),1440);}
+    catch(InvalidOperationException ex){return Results.Conflict(ex.Message);}
+    var link=(Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"")+"/?authToken="+raw;
+    try{await SendAccountEmail(email,"Verify your Inventory Manager account",
+        "Your employee ID: "+req.EmployeeId+"\n\nVerify this email and activate your account:\n"+link+
+        "\n\nThis link expires in 24 hours and can be used only once. If you did not request this, ignore it.");}
+    catch(Exception ex){app.Logger.LogWarning(ex,"Employee activation email could not be sent");return Results.Problem("Account verification email could not be sent. Ask an administrator to check the global mail sender.",statusCode:503);}
+    await tx.CommitAsync();
+    return Results.Ok(new{sent=true,message="Check your email for a verification link."});
+}).RequireRateLimiting("sensitive");
+
+// Password recovery only works for the address already verified for that employee.
+// Identical responses prevent outsiders from learning who is registered.
+app.MapPost("/api/auth/forgot-password",async (HttpContext ctx,ForgotPassword req)=>{
+    const string message="If this employee ID has a verified email address, a password reset link will be sent.";
+    if(!Regex.IsMatch(req.EmployeeId??"", @"^[A-Za-z0-9_-]{2,24}$"))return Results.Ok(new{message});
+    if(!await AccountMailReady())return Results.Problem("Password reset email is temporarily unavailable. Contact an administrator.",statusCode:503);
+    await using var c=await Connect();
+    await using var tx=await c.BeginTransactionAsync();
+    await using var find=new NpgsqlCommand("""
+        SELECT email FROM employees WHERE id=@id AND active
+          AND password_hash IS NOT NULL AND email_verified_at IS NOT NULL FOR UPDATE
+        """,c,tx);
+    find.Parameters.AddWithValue("id",req.EmployeeId!);
+    var email=(string?)await find.ExecuteScalarAsync();
+    if(string.IsNullOrEmpty(email))return Results.Ok(new{message});
+    try{
+        var raw=await CreateAccountEmailToken(c,(NpgsqlTransaction)tx,req.EmployeeId!,email,"reset",null,30);
+        var link=(Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"")+"/?authToken="+raw;
+        await SendAccountEmail(email,"Reset your Inventory Manager password",
+            "A password reset was requested for employee ID "+req.EmployeeId+".\n\nTo set a new password, open:\n"+
+            link+"\n\nThis link expires in 30 minutes and works only once. If you did not request it, ignore this email.");
+        await tx.CommitAsync();
+    }catch(Exception ex){app.Logger.LogWarning(ex,"Employee password reset email could not be sent or was throttled");}
+    return Results.Ok(new{message});
+}).RequireRateLimiting("sensitive");
+
+// The one-time owner bootstrap may predate mail configuration. After the global
+// sender is connected, its password-authenticated owner confirms mailbox ownership.
+app.MapPost("/api/auth/send-verification",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);
+    if(who is null)return Results.Unauthorized();
+    if(!await AccountMailReady())return Results.Problem("Configure the global Gmail/SMTP sender before verifying the address.",statusCode:503);
+    await using var c=await Connect();
+    await using var tx=await c.BeginTransactionAsync();
+    await using var find=new NpgsqlCommand("""
+        SELECT email,email_verified_at FROM employees WHERE id=@id AND active FOR UPDATE
+        """,c,tx);
+    find.Parameters.AddWithValue("id",who.Value.employee);
+    string? email=null;bool alreadyVerified=false;
+    await using(var r=await find.ExecuteReaderAsync()){
+        if(await r.ReadAsync()){email=r.IsDBNull(0)?null:r.GetString(0);alreadyVerified=!r.IsDBNull(1);}
+    }
+    if(email is null)return Results.BadRequest("No account email is configured.");
+    if(alreadyVerified)return Results.Ok(new{verified=true});
+    string raw;
+    try{raw=await CreateAccountEmailToken(c,(NpgsqlTransaction)tx,who.Value.employee,email,"verify",null,1440);}
+    catch(InvalidOperationException ex){return Results.Conflict(ex.Message);}
+    var link=(Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"")+"/?authToken="+raw;
+    try{await SendAccountEmail(email,"Verify your Inventory Manager email",
+        "Confirm the email address for employee ID "+who.Value.employee+":\n"+link+
+        "\n\nThis single-use link expires in 24 hours.");}
+    catch(Exception ex){app.Logger.LogWarning(ex,"Account verification email failed");return Results.Problem("Verification email could not be sent.",statusCode:503);}
+    await tx.CommitAsync();
+    return Results.Ok(new{sent=true});
+}).RequireRateLimiting("sensitive");
+
+// Token details are only available to the holder of the random emailed token.
+// No secrets are returned and the token is not consumed by previewing it.
+app.MapPost("/api/auth/token-info",async (AuthEmailToken req)=>{
+    if(!Regex.IsMatch(req.Token??"",@"^[0-9A-Fa-f]{64}$"))return Results.BadRequest("Invalid or expired link.");
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("""
+        SELECT employee_id,purpose,expires_at FROM auth_email_tokens
+        WHERE token_hash=@hash AND expires_at>now()
+        """,c);
+    cmd.Parameters.AddWithValue("hash",Hash(req.Token!));
+    await using var r=await cmd.ExecuteReaderAsync();
+    if(!await r.ReadAsync())return Results.BadRequest("This link has expired or has already been used.");
+    return Results.Ok(new{employeeId=r.GetString(0),purpose=r.GetString(1),expiresAt=r.GetDateTime(2)});
+}).RequireRateLimiting("sensitive");
+
+// Atomic consumption: the token cannot be used again even if two tabs submit together.
+app.MapPost("/api/auth/complete-token",async (CompleteAuthToken req)=>{
+    if(!Regex.IsMatch(req.Token??"",@"^[0-9A-Fa-f]{64}$"))return Results.BadRequest("Invalid or expired link.");
+    await using var c=await Connect();
+    await using var tx=await c.BeginTransactionAsync();
+    await using var find=new NpgsqlCommand("""
+        SELECT employee_id,purpose,email,pending_password_hash FROM auth_email_tokens
+        WHERE token_hash=@hash AND expires_at>now() FOR UPDATE
+        """,c,tx);
+    find.Parameters.AddWithValue("hash",Hash(req.Token!));
+    string employee,purpose,email;string? pendingHash;
+    await using(var r=await find.ExecuteReaderAsync()){
+        if(!await r.ReadAsync())return Results.BadRequest("This link has expired or has already been used.");
+        employee=r.GetString(0);purpose=r.GetString(1);email=r.GetString(2);
+        pendingHash=r.IsDBNull(3)?null:r.GetString(3);
+    }
+    if(purpose=="reset"&&(!PasswordValid(req.Password)||req.Password!=req.ConfirmPassword))
+        return Results.BadRequest("Passwords must match and contain at least 8 characters, uppercase, lowercase, a number and a symbol.");
+    string sql=purpose switch{
+        "activate"=>"""
+            UPDATE employees SET email=@email,email_verified_at=now(),password_hash=@password,
+            password_updated_at=now(),bootstrap_provisional=false
+            WHERE id=@id AND active AND password_hash IS NULL
+            """,
+        "verify"=>"""
+            UPDATE employees SET email_verified_at=now(),bootstrap_provisional=false
+            WHERE id=@id AND active AND lower(email)=@email AND password_hash IS NOT NULL
+            """,
+        "reset"=>"""
+            UPDATE employees SET password_hash=@password,password_updated_at=now()
+            WHERE id=@id AND active AND lower(email)=@email AND email_verified_at IS NOT NULL
+            """,
+        _=>throw new InvalidOperationException("Unknown email token purpose")
+    };
+    if(purpose=="activate"&&string.IsNullOrWhiteSpace(pendingHash))return Results.BadRequest("Invalid activation link.");
+    await using var update=new NpgsqlCommand(sql,c,tx);
+    update.Parameters.AddWithValue("id",employee);
+    update.Parameters.AddWithValue("email",email);
+    update.Parameters.AddWithValue("password",purpose=="activate"?pendingHash!:purpose=="reset"?PasswordHash(req.Password!):"");
+    try{
+        if(await update.ExecuteNonQueryAsync()!=1)return Results.BadRequest("This account is no longer eligible for this link.");
+    }catch(PostgresException ex)when(ex.SqlState=="23505"){return Results.Conflict("That email address is already registered.");}
+    await using var clearTokens=new NpgsqlCommand("DELETE FROM auth_email_tokens WHERE employee_id=@id",c,tx);
+    clearTokens.Parameters.AddWithValue("id",employee);await clearTokens.ExecuteNonQueryAsync();
+    if(purpose=="reset"){
+        await using var clearSessions=new NpgsqlCommand("DELETE FROM sessions WHERE employee_id=@id",c,tx);
+        clearSessions.Parameters.AddWithValue("id",employee);await clearSessions.ExecuteNonQueryAsync();
+    }
+    await tx.CommitAsync();
+    return Results.Ok(new{completed=true,purpose,message=purpose=="reset"?"Password changed. Sign in with your new password.":"Email verified. You may now sign in."});
+}).RequireRateLimiting("sensitive");
 app.MapGet("/api/auth/stores",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
