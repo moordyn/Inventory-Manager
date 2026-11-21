@@ -290,4 +290,4 @@ jobs:
             exit 0
           fi
           gh release create v1.2.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'Inventory Manager v1.2.0' --notes-file docs/releases/v1.2.0.md --latest
-          gh release view v1.2.0 --repo "$GITHUB_REPOSITORY" --json tagName,url,publishedAt,isLatest
+          gh release view v1.2.0 --repo "$GITHUB_REPOSITORY" --json tagName,url,publishedAt
