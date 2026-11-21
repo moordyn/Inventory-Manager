@@ -11,6 +11,9 @@ An **employee ID** is the login name and is globally unique across stores. Emplo
 | Login, change own verified email | Yes | Yes | Yes |
 | Create employee for an authorized store | No | Yes | Yes |
 | Manage assigned store permissions / access | No | Limited to authorized store | Yes |
+| Change own display name | No | Yes | Yes |
+| Rename other ordinary employees at an assigned store | No | Yes | Yes |
+| Rename another administrator's display name | No | No | Yes |
 | Change any employee ID (including own) | No | No | Yes |
 | Promote/demote global admins | No | No | Yes |
 | Rename original owner ID | No | No | Yes |
@@ -41,6 +44,18 @@ Administrators create an employee's **ID, name, primary store**; no password is 
 **Forgot password:** From sign-in, enter the employee ID. If it has a verified email, a **30-minute single-use** reset link is sent there; the response does not disclose whether an account exists. Choosing a valid replacement password invalidates old sessions and login credentials. Contact an administrator if the mailbox cannot be accessed; do not bypass verification by directly overwriting hashes.
 
 **First-run owner verification:** The provisional recovery owner can sign in while the global sender is being configured; verify the mailbox promptly before public use.
+
+## Rename employee display names — role scoped
+
+Open **Administration → Team & permissions**, find an employee, and choose **Rename**. Enter the replacement display name (1–100 characters). This does **not** alter the employee's permanent ID, login, passwords, session, inventory history or store grants.
+
+- **Store administrators** can rename **themselves**, plus non-administrator employees who have access to the store they are currently managing (including employees whose primary location is another store). They **cannot** rename another store administrator or global administrator, even if that person is assigned to the same store.
+- **Global administrators** can rename **any employee**, including themselves and the original recovery owner.
+- **Ordinary employees** cannot rename themselves or anyone else.
+
+The API enforces these permissions independently of whether a button is visible. Successful changes are recorded in the administrator audit log. Display-name changes appear on the next reload; employees who rename themselves see the new name immediately.
+
+**Display names and IDs are different:** Only global administrators can change employee IDs. The rules below continue to apply to IDs.
 
 ## Change employee ID — global admins only
 
