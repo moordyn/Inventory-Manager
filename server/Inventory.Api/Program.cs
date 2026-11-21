@@ -411,7 +411,7 @@ async Task<bool> CanManageStore(HttpContext ctx,string store){
 // Canonical external HTTPS origin is configured per installation, never inferred from untrusted Host headers.
 // Use the original production domain only as a compatibility default for pre-PUBLIC_ORIGIN installs.
 var publicOriginText=Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"https://zagginventorymanager.com";
-if(!Uri.TryCreate(publicOriginText,out Uri? publicOriginUri)
+if(!Uri.TryCreate(publicOriginText,UriKind.Absolute,out Uri? publicOriginUri)
    || publicOriginUri.Scheme!=Uri.UriSchemeHttps
    || publicOriginUri.HostNameType!=UriHostNameType.Dns
    || !publicOriginUri.Host.Contains('.')
