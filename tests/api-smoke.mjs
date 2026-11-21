@@ -143,6 +143,28 @@ await call('auth/complete-token',{method:'POST',body:{token:activateCode},expect
 await call('auth/complete-token',{method:'POST',body:{token:activateCode},expect:400});
 let employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:200})).body.token;
 assert.equal((await call('auth/me',{token:employeeToken})).body.emailVerified,true);
+// Account email changes only activate after proving possession of the new mailbox.
+await call('auth/change-email',{token:employeeToken,method:'POST',body:{
+  email:'updated.employee@example.com',confirmEmail:'different@example.com',password:employeePassword
+},expect:400});
+await call('auth/change-email',{token:employeeToken,method:'POST',body:{
+  email:'updated.employee@example.com',confirmEmail:'updated.employee@example.com',password:'wrong-password'
+},expect:403});
+await call('auth/change-email',{token:employeeToken,method:'POST',body:{
+  email:'updated.employee@example.com',confirmEmail:'updated.employee@example.com',password:employeePassword
+},expect:200});
+assert.equal((await call('auth/me',{token:employeeToken})).body.email,'test.employee@example.com');
+const emailChangeCode=latestEmail('updated.employee@example.com','Confirm your new Inventory Manager email');
+assert.equal((await call('auth/token-info',{method:'POST',body:{token:emailChangeCode},expect:200})).body.purpose,'change_email');
+await call('auth/complete-token',{method:'POST',body:{token:emailChangeCode},expect:200});
+await call('auth/complete-token',{method:'POST',body:{token:emailChangeCode},expect:400});
+await call('auth/me',{token:employeeToken,expect:401});
+employeeToken=(await call('auth/employee-login',{method:'POST',body:{
+  employeeId:'TESTUSER',password:employeePassword
+},expect:200})).body.token;
+assert.equal((await call('auth/me',{token:employeeToken})).body.email,'updated.employee@example.com');
+await call('admin/employees/TESTUSER/id',{token:employeeToken,method:'PUT',body:{newId:'OTHERUSER'},expect:403});
+
 // Any employee with access to the store can add context to a coworker's checkout.
 const coworkerEdit=await call('movements/'+ownerCheckoutId+'/note',{token:employeeToken,method:'PUT',
  body:{note:'Damaged during repair; display damage confirmed',expectedRevision:1},expect:200});
@@ -188,19 +210,34 @@ const scoped=(await call('admin/audit',{token:storeAdmin})).body;
 assert.ok(scoped.every(x=>x.storeId==='DEFAULT'),'Store admins only see their own location activity');
 await call('admin/stores',{token:storeAdmin,method:'POST',body:{id:'NOPE',name:'Should not be created'},expect:403});
 
+// Only global administrators can edit IDs. Preserve store access and transaction ownership.
+await call('admin/employees/TESTUSER/id',{token:storeAdmin,method:'PUT',body:{newId:'RENAMEDUSER'},expect:403});
+await call('admin/employees/OWNER/id',{token:admin,method:'PUT',body:{newId:'RENAMEDOWNER'},expect:400});
+await call('admin/employees/TESTUSER/id',{token:admin,method:'PUT',body:{newId:'OWNER'},expect:400});
+await call('admin/employees/TESTUSER/id',{token:admin,method:'PUT',body:{newId:'RENAMEDUSER'},expect:200});
+await call('auth/me',{token:storeAdmin,expect:401});
+await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:401});
+const renamedLogin=(await call('auth/employee-login',{method:'POST',body:{employeeId:'RENAMEDUSER',password:employeePassword},expect:200})).body.token;
+assert.equal((await call('auth/me',{token:renamedLogin})).body.employeeId,'RENAMEDUSER');
+const renamedHistory=(await call('items/'+id+'/history',{token:admin})).body;
+assert.ok(renamedHistory.some(x=>x.employeeId==='RENAMEDUSER'));
+const renamedAccess=(await call('admin/employee-access',{token:admin})).body;
+assert.ok(renamedAccess.some(x=>x.employeeId==='RENAMEDUSER'));
+const renamedToken=renamedLogin;
+
 // Forgot-password recovery goes only to the already-verified email and invalidates old sessions.
 const unknownReset=await call('auth/forgot-password',{method:'POST',body:{employeeId:'UNKNOWNUSER'},expect:200});
-const knownReset=await call('auth/forgot-password',{method:'POST',body:{employeeId:'TESTUSER'},expect:200});
+const knownReset=await call('auth/forgot-password',{method:'POST',body:{employeeId:'RENAMEDUSER'},expect:200});
 assert.equal(unknownReset.body.message,knownReset.body.message,'Reset response must not expose whether an account exists');
-const resetCode=latestEmail('test.employee@example.com','Reset your Inventory Manager password');
+const resetCode=latestEmail('updated.employee@example.com','Reset your Inventory Manager password');
 await call('auth/complete-token',{method:'POST',body:{token:resetCode,password:'short',confirmPassword:'short'},expect:400});
 const resetPassword='ChangedPassword2!';
 await call('auth/complete-token',{method:'POST',body:{token:resetCode,password:resetPassword,confirmPassword:resetPassword},expect:200});
 await call('auth/complete-token',{method:'POST',body:{token:resetCode,password:resetPassword,confirmPassword:resetPassword},expect:400});
-await call('auth/me',{token:storeAdmin,expect:401});
+await call('auth/me',{token:renamedToken,expect:401});
 await call('auth/me',{token:employeeToken,expect:401});
-await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:401});
-employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:resetPassword},expect:200})).body.token;
+await call('auth/employee-login',{method:'POST',body:{employeeId:'RENAMEDUSER',password:employeePassword},expect:401});
+employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'RENAMEDUSER',password:resetPassword},expect:200})).body.token;
 assert.ok(employeeToken,'New password should permit login');
 
 await call('items/'+id+'/delete',{token:admin,method:'POST',body:{confirmation:'TEST CHARGING KIT'},expect:200});
