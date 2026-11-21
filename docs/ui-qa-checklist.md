@@ -53,6 +53,19 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] Confirm store admins only see their store's admin activity while global admins see activity across all stores
 - [ ] Rename a store and ensure its existing activity history remains linked to the new store ID
 
+## Checkout follow-up notes
+- [ ] Check out a product for repair, then open **History** and click **Edit note** on that checkout
+- [ ] Add a follow-up such as "Damaged during repair" and save; verify it appears immediately in history
+- [ ] Open the product's **Edit → View history** and confirm the new note appears there too
+- [ ] Verify checkout quantity, before/after balances, original checkout timestamp and original employee are unchanged
+- [ ] Edit the same checkout twice, then open **View changes** to inspect previous values, revision author and timestamp
+- [ ] A non-admin employee can change their own checkout's note, but not a coworker's
+- [ ] Store/global administrators can edit a checkout note within an authorized store
+- [ ] Attempt to edit a check-in note, a different store's checkout, or a stale note revision; verify rejection
+- [ ] Confirm the note editor cannot save blank notes or more than 1,000 characters
+- [ ] Confirm a note edit inside a product modal does not save or overwrite unsaved product fields
+- [ ] Confirm editing a note as admin creates an activity-log entry without copying the note text
+
 ## Release readiness beyond visual checks
 - [ ] CI .NET Release build passes.
 - [ ] Validate schema migrations against a copy of production PostgreSQL.
