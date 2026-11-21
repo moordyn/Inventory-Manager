@@ -38,6 +38,15 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] Original owner can rename `OWNER` to a new ID, log back in as that ID, retain global privileges and remain unable to demote the recovery-owner account.
 - [ ] Restart and `/api/auth/status` after an OWNER rename: app remains initialized and does not create a second OWNER account.
 
+## Login aurora motion and accessibility
+
+- [ ] Sign-in, account setup, activation and password-reset views show a soft theme-color ambient animation behind the card.
+- [ ] Moving or dragging the mouse generates fading swishes/clouds without intercepting form clicks or input focus.
+- [ ] Background colors change with the globally configured login palette across all ten themes, including subdued Glacier Light.
+- [ ] The animation stops on successful sign-in, resumes on logout, and pauses when the browser tab is hidden.
+- [ ] Enabling reduced-motion prevents animated rendering and leaves a readable static theme-based background.
+- [ ] Test on desktop Chrome/Firefox and iOS Safari, including touch, resizing, keyboard-only login and battery/performance behavior.
+
 ## Ten themes and brand identity
 
 - [ ] Evergreen, Deep Purple, Midnight Ocean, Copper Ember, Rose Noir, Arctic Slate, Forest Night, Champagne Gold, Crimson Night and Glacier Light are available under Settings → Appearance for **every** authenticated employee.
