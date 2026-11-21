@@ -63,7 +63,7 @@ app.MapPost("/api/auth/login", async (Login request) =>
     var parts = stored.Split(':');
     if (parts.Length != 2 || !Equal(PinHash(request.Pin!, Convert.FromHexString(parts[0])), parts[1])) return Results.Unauthorized();
     var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-    await using var insert = new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at) VALUES(@h,now()+interval '8 hours')", c);
+    await using var insert = new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) VALUES(@h,now()+interval '8 hours','DEFAULT','OWNER',true)", c);
     insert.Parameters.AddWithValue("h", Hash(token));
     await insert.ExecuteNonQueryAsync();
     return Results.Ok(new { token });
@@ -183,16 +183,29 @@ await using (var c=await Connect())
 {
     await using var cmd=new NpgsqlCommand("""
     CREATE TABLE IF NOT EXISTS settings(key text PRIMARY KEY,value text NOT NULL);
+    CREATE TABLE IF NOT EXISTS stores(id text PRIMARY KEY,name text NOT NULL,active boolean NOT NULL DEFAULT true);
+    INSERT INTO stores(id,name) VALUES('DEFAULT','Original Store') ON CONFLICT DO NOTHING;
+    CREATE TABLE IF NOT EXISTS employees(store_id text NOT NULL REFERENCES stores(id),id text NOT NULL,name text NOT NULL,active boolean NOT NULL DEFAULT true,PRIMARY KEY(store_id,id));
+    INSERT INTO employees(store_id,id,name) VALUES('DEFAULT','OWNER','Original Administrator') ON CONFLICT DO NOTHING;
     CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY,expires_at timestamptz NOT NULL);
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT';
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS employee_id text NOT NULL DEFAULT 'OWNER';
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_admin boolean NOT NULL DEFAULT false;
     CREATE TABLE IF NOT EXISTS items(id uuid PRIMARY KEY,sku text NOT NULL UNIQUE,name text NOT NULL,quantity integer NOT NULL DEFAULT 0 CHECK(quantity>=0));
     CREATE TABLE IF NOT EXISTS movements(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,item_id uuid NOT NULL REFERENCES items(id),delta integer NOT NULL CHECK(delta<>0),before_qty integer NOT NULL,after_qty integer NOT NULL,note text,created_at timestamptz NOT NULL DEFAULT now());
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT' REFERENCES stores(id);
+    ALTER TABLE movements ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT' REFERENCES stores(id);
+    ALTER TABLE movements ADD COLUMN IF NOT EXISTS employee_id text NOT NULL DEFAULT 'LEGACY';
+    ALTER TABLE items DROP CONSTRAINT IF EXISTS items_sku_key;
+    CREATE UNIQUE INDEX IF NOT EXISTS items_store_sku_idx ON items(store_id,sku);
     ALTER TABLE items ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT '';
     ALTER TABLE items ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '';
     ALTER TABLE items ADD COLUMN IF NOT EXISTS barcode text;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS min_stock integer NOT NULL DEFAULT 0;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS unit_cost numeric(12,2);
     ALTER TABLE items ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
-    CREATE UNIQUE INDEX IF NOT EXISTS items_barcode_idx ON items(barcode) WHERE barcode IS NOT NULL;
+    DROP INDEX IF EXISTS items_barcode_idx;
+    CREATE UNIQUE INDEX IF NOT EXISTS items_store_barcode_idx ON items(store_id,barcode) WHERE barcode IS NOT NULL;
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS idempotency_key uuid;
     CREATE UNIQUE INDEX IF NOT EXISTS movements_idempotency_key_idx ON movements(idempotency_key) WHERE idempotency_key IS NOT NULL;
     """,c);
