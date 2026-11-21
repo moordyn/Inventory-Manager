@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 ## Unreleased — next feature release
 
+- Added a theme-matched Overview Repair Queue dashboard card showing store-specific active, in-progress and awaiting-pickup counts, outstanding balance, oldest four tickets, and direct ticket access.
+
+
 - Fixed repair pickup availability: **Ready for Pickup** now exposes **Mark Paid / Picked Up** directly, without requiring the intermediate Completed status, while preserving balance settlement and idempotency safeguards.
 
 - Repair payments now use a single final **Mark Paid / Picked Up** action after completion instead of arbitrary additional payments. Completed repairs remain in queue awaiting pickup; the entire remaining balance and pickup are recorded atomically, once, with employee/time audit and existing-ticket migration.
