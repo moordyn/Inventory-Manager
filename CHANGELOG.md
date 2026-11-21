@@ -6,6 +6,7 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 ## Unreleased — next feature release
 
+- Animated theme-aware sign-in aurora: ambient drifting color clouds and pointer/touch light trails, with a reduced-motion fallback, paused background rendering and mobile-friendly frame caps.
 - Added ten cohesive palettes: Evergreen (mint), Deep Purple, Midnight Ocean, Copper Ember, Rose Noir, Arctic Slate, Forest Night, Champagne Gold, Crimson Night, and Glacier Light (**light mode**).
 - Employees choose their own persistent dashboard palette from **Settings → Appearance**, maintained by server-side account preferences and applied across devices.
 - Global administrators select the public sign-in/activation theme, independently of individual employee preferences; changes are audited and protected by a role-checked API.
