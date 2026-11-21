@@ -38,7 +38,7 @@ Replace `inventory.example.com` with a hostname **you control** (root domain or 
 | Backups, restore, troubleshooting, monitoring, disaster recovery | [Operations](docs/operations.md) |
 | Service/data design and source locations | [Architecture](docs/architecture.md) |
 | Desktop, mobile, camera and release acceptance tests | [QA checklist](docs/ui-qa-checklist.md) |
-| Changes by version | [Changelog](CHANGELOG.md) and [releases](docs/releases/) |
+| Changes by version | [Changelog](CHANGELOG.md), [v1.2.0 notes](docs/releases/v1.2.0.md), and [releases](docs/releases/) |
 | Legacy all-in-one link | [Documentation index](docs/COMPLETE_DEPLOYMENT_GUIDE.md) |
 
 ## Update an installation
