@@ -616,7 +616,7 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
             create.Parameters.AddWithValue("newId",newId);create.Parameters.AddWithValue("name",name);create.Parameters.AddWithValue("oldId",id);
             await create.ExecuteNonQueryAsync();
         }
-        foreach(var table in new[]{"items","movements","employees","employee_store_access","sessions","low_stock_state","alert_outbox","store_alert_settings","google_store_accounts","google_oauth_states"}){
+        foreach(var table in new[]{"items","movements","employees","employee_store_access","sessions","low_stock_state","alert_outbox","store_alert_settings","google_store_accounts","google_oauth_states","repair_tickets","repair_parts","repair_payments","repair_events"}){
             await using var move=new NpgsqlCommand($"UPDATE {table} SET store_id=@newId WHERE store_id=@oldId",c,tx);
             move.Parameters.AddWithValue("newId",newId);move.Parameters.AddWithValue("oldId",id);
             await move.ExecuteNonQueryAsync();
@@ -1457,6 +1457,9 @@ app.MapPost("/api/items/{id:guid}/delete",async (HttpContext ctx,Guid id,DeleteI
     app.Logger.LogInformation("Product {ProductId} archived by employee {Employee} in store {Store}",id,who.Value.employee,who.Value.store);
     return Results.Ok(new{deleted=true});
 });
+// Repair endpoints share the existing session identity, store permissions and low-stock outbox.
+RepairQueueEndpoints.Map(app,Connect,Identity,QueueLowStock);
+
 // Delivery loop runs on the API host; inventory operations never depend on Gmail availability.
 await using (var c=await Connect())
 {
@@ -1544,6 +1547,64 @@ await using (var c=await Connect())
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS idempotency_key uuid;
     CREATE UNIQUE INDEX IF NOT EXISTS movements_idempotency_key_idx ON movements(idempotency_key) WHERE idempotency_key IS NOT NULL;
     CREATE INDEX IF NOT EXISTS movements_store_item_recent_idx ON movements(store_id,item_id,id DESC);
+
+    -- Repairs: append-only usage history and atomic inventory adjustments per store.
+    CREATE TABLE IF NOT EXISTS repair_tickets(
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      store_id text NOT NULL REFERENCES stores(id),
+      created_by text NOT NULL,
+      assigned_to text,
+      device text NOT NULL,
+      repair_type text NOT NULL,
+      customer_name text,
+      customer_contact text,
+      serial_number text,
+      notes text,
+      quoted_total numeric(12,2) NOT NULL CHECK(quoted_total>=0),
+      paid_upfront numeric(12,2) NOT NULL CHECK(paid_upfront>=0 AND paid_upfront<=quoted_total),
+      status text NOT NULL DEFAULT 'checked_in' CHECK(status IN ('checked_in','in_progress','waiting_parts','ready','completed','cancelled')),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      closed_at timestamptz
+    );
+    CREATE INDEX IF NOT EXISTS repair_tickets_store_queue_idx
+      ON repair_tickets(store_id,created_at,id);
+    CREATE TABLE IF NOT EXISTS repair_parts(
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      repair_id bigint NOT NULL REFERENCES repair_tickets(id),
+      store_id text NOT NULL REFERENCES stores(id),
+      item_id uuid NOT NULL REFERENCES items(id),
+      quantity integer NOT NULL CHECK(quantity>0),
+      scanned_by text NOT NULL,
+      used_at timestamptz NOT NULL DEFAULT now(),
+      movement_id bigint NOT NULL UNIQUE REFERENCES movements(id),
+      request_key uuid NOT NULL UNIQUE,
+      returned_at timestamptz,
+      returned_by text,
+      return_key uuid UNIQUE,
+      return_movement_id bigint UNIQUE REFERENCES movements(id)
+    );
+    CREATE INDEX IF NOT EXISTS repair_parts_by_repair_idx ON repair_parts(repair_id,id);
+    CREATE TABLE IF NOT EXISTS repair_payments(
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      repair_id bigint NOT NULL REFERENCES repair_tickets(id),
+      store_id text NOT NULL REFERENCES stores(id),
+      employee_id text NOT NULL,
+      amount numeric(12,2) NOT NULL CHECK(amount>0),
+      request_key uuid NOT NULL UNIQUE,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS repair_payments_by_repair_idx ON repair_payments(repair_id,id);
+    CREATE TABLE IF NOT EXISTS repair_events(
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      repair_id bigint NOT NULL REFERENCES repair_tickets(id),
+      store_id text NOT NULL REFERENCES stores(id),
+      employee_id text NOT NULL,
+      kind text NOT NULL,
+      details text NOT NULL DEFAULT '',
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS repair_events_by_repair_idx ON repair_events(repair_id,id DESC);
 
     -- v1.1.0: employee email/password identity and one-time verification/reset links.
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS theme text NOT NULL DEFAULT 'mint';
