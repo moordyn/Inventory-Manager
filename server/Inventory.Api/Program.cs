@@ -172,10 +172,14 @@ async Task SignInSucceeded(HttpContext ctx,string kind){
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // The installation token is a one-time bootstrap credential for the original OWNER.
 // No shared PIN remains accepted for login after the password-authentication migration.
+static bool ThemeValid(string? theme)=>theme is "mint" or "purple" or "ocean" or "ember" or "rose";
 app.MapGet("/api/auth/status", async ()=>{
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=(SELECT value FROM settings WHERE key='owner_employee_id') AND active AND global_admin AND password_hash IS NOT NULL)",c);
-    return Results.Ok(new{initialized=(bool)(await cmd.ExecuteScalarAsync()??false),loginMethod="password"});
+    var initialized=(bool)(await cmd.ExecuteScalarAsync()??false);
+    await using var themeCmd=new NpgsqlCommand("SELECT value FROM settings WHERE key='login_theme'",c);
+    var loginTheme=(string?)await themeCmd.ExecuteScalarAsync();
+    return Results.Ok(new{initialized,loginMethod="password",loginTheme=ThemeValid(loginTheme)?loginTheme:"mint"});
 });
 app.MapPost("/api/auth/setup",async (Setup request)=>{
     if(!Equal(Hash(request.SetupToken??""),Hash(setupToken)))return Results.Unauthorized();
@@ -246,7 +250,7 @@ app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
     if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("""
-        SELECT name,email,email_verified_at IS NOT NULL FROM employees
+        SELECT name,email,email_verified_at IS NOT NULL,theme FROM employees
         WHERE id=@employee ORDER BY CASE WHEN primary_store_id=@store THEN 0 ELSE 1 END LIMIT 1
         """,c);
     cmd.Parameters.AddWithValue("employee",who.Value.employee);
@@ -256,9 +260,33 @@ app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
     return Results.Ok(new{
         storeId=who.Value.store,employeeId=who.Value.employee,
         employeeName=reader.GetString(0),email=reader.IsDBNull(1)?null:reader.GetString(1),
-        emailVerified=reader.GetBoolean(2),isAdmin=who.Value.admin,isGlobalAdmin=who.Value.globalAdmin
+        emailVerified=reader.GetBoolean(2),theme=ThemeValid(reader.GetString(3))?reader.GetString(3):"mint",isAdmin=who.Value.admin,isGlobalAdmin=who.Value.globalAdmin
     });
 });
+// Preferences are persisted server-side per employee, independent of browser/device.
+app.MapPut("/api/auth/theme",async (HttpContext ctx,ThemeChoice req)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!ThemeValid(req.Theme))return Results.BadRequest("Unknown theme.");
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("UPDATE employees SET theme=@theme WHERE id=@id AND active",c);
+    cmd.Parameters.AddWithValue("theme",req.Theme!);cmd.Parameters.AddWithValue("id",who.Value.employee);
+    return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{theme=req.Theme}):Results.NotFound();
+});
+app.MapPut("/api/admin/theme/login",async (HttpContext ctx,ThemeChoice req)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if(!ThemeValid(req.Theme))return Results.BadRequest("Unknown theme.");
+    await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
+    await using(var cmd=new NpgsqlCommand("""
+        INSERT INTO settings(key,value) VALUES('login_theme',@theme)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value
+        """,c,tx)){
+        cmd.Parameters.AddWithValue("theme",req.Theme!);await cmd.ExecuteNonQueryAsync();
+    }
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,null,"theme.login_changed","login",req.Theme!);
+    await tx.CommitAsync();return Results.Ok(new{loginTheme=req.Theme});
+});
+
 app.MapPost("/api/auth/employee-login",async (HttpContext ctx,EmployeeLogin req)=>{
     var locked=await CheckSignInLock(ctx,"employee");
     if(locked is not null)return locked;
@@ -1518,6 +1546,8 @@ await using (var c=await Connect())
     CREATE INDEX IF NOT EXISTS movements_store_item_recent_idx ON movements(store_id,item_id,id DESC);
 
     -- v1.1.0: employee email/password identity and one-time verification/reset links.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS theme text NOT NULL DEFAULT 'mint';
+    INSERT INTO settings(key,value) VALUES ('login_theme','mint') ON CONFLICT(key) DO NOTHING;
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS email text;
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash text;
@@ -1615,6 +1645,7 @@ record SelectStore(string? StoreId);
 record StoreRequest(string? Id,string? Name);
 record EmployeeRequest(string? StoreId,string? Id,string? Name);
 record EmployeeNameRequest(string? Name);
+record ThemeChoice(string? Theme);
 
 record StoreNameRequest(string? Name);
 record AlertSettingsRequest(bool Enabled,string? Recipients);
