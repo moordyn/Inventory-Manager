@@ -33,7 +33,7 @@ static string CsvField(string? raw){
     var value=raw??"";
     // Escape spreadsheet formulas supplied in SKU/name/category/description.
     if(value.Length>0&&"=+-@\t\r\n".Contains(value[0]))value="'"+value;
-    return "\"" + value.Replace("\"","\"""") + "\"";
+    return "\"" + value.Replace("\"","\"\"") + "\"";
 }
 static IResult CsvFile(string content,string filename){
     var bytes=Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(content)).ToArray();
