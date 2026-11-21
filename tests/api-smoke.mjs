@@ -1,11 +1,15 @@
 // Tests run against a disposable PostgreSQL 17 database and the .NET API.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 const base=process.env.TEST_API_URL||'http://127.0.0.1:18424';
 const setupToken=process.env.SETUP_TOKEN;
 assert.ok(setupToken,'SETUP_TOKEN must be set');
-const pin='682951';
+const ownerPassword='InitialOwner1!';
+const employeePassword='EmployeeSetup1!';
+const senderOutbox=process.env.AUTH_EMAIL_TEST_OUTBOX;
+assert.ok(senderOutbox,'AUTH_EMAIL_TEST_OUTBOX must be set for integration tests');
 
 async function call(path,{method='GET',token,body,expect}={}){
   const response=await fetch(base+'/api/'+path,{
@@ -20,12 +24,32 @@ async function call(path,{method='GET',token,body,expect}={}){
   return {status:response.status,body:type.includes('json')&&text?JSON.parse(text):text,headers:response.headers};
 }
 
-const setup=await call('auth/setup',{method:'POST',body:{setupToken,pin,confirmPin:pin},expect:200});
+function latestEmail(address,subjectPart){
+ const rows=readFileSync(senderOutbox,'utf8').trim().split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line));
+ const match=rows.reverse().find(row=>row.email===address&&row.subject.includes(subjectPart));
+ assert.ok(match,'Missing captured account email for '+address+' subject '+subjectPart);
+ const code=match.body.match(/authToken=([0-9A-F]{64})/);
+ assert.ok(code,'Expected secure one-time token link in email');
+ return code[1];
+}
+const ownerEmail='owner@example.com';
+const setup=await call('auth/setup',{method:'POST',body:{
+ setupToken,email:ownerEmail,confirmEmail:ownerEmail,password:ownerPassword,confirmPassword:ownerPassword
+},expect:200});
 assert.equal(setup.body.created,true);
-const login=(await call('auth/login',{method:'POST',body:{employeeId:'OWNER',pin},expect:200})).body;
+await call('auth/login',{method:'POST',body:{employeeId:'OWNER',pin:'682951'},expect:410});
+const login=(await call('auth/employee-login',{method:'POST',body:{employeeId:'OWNER',password:ownerPassword},expect:200})).body;
 assert.match(login.token,/^[0-9A-F]{64}$/i);
 const admin=login.token;
 assert.equal((await call('auth/me',{token:admin})).body.isGlobalAdmin,true);
+assert.equal((await call('auth/me',{token:admin})).body.emailVerified,false);
+await call('auth/send-verification',{token:admin,method:'POST',expect:200});
+const ownerCode=latestEmail(ownerEmail,'Verify your Inventory Manager email');
+assert.equal((await call('auth/token-info',{method:'POST',body:{token:ownerCode},expect:200})).body.purpose,'verify');
+await call('auth/complete-token',{method:'POST',body:{token:ownerCode},expect:200});
+await call('auth/complete-token',{method:'POST',body:{token:ownerCode},expect:400});
+assert.equal((await call('auth/me',{token:admin})).body.emailVerified,true);
+assert.equal((await call('auth/activity',{token:admin,method:'POST',expect:200})).body.renewed,true);
 
 const sku='=2+2';
 const created=await call('items',{token:admin,method:'POST',body:{sku,name:'Test charging kit',quantity:4,minStock:4,unitCost:12.5,category:'Accessories',barcode:'701233100200',description:'Stock test'},expect:201});
@@ -101,7 +125,24 @@ assert.ok(audit.some(x=>x.action==='employee.created'));
 assert.ok(audit.some(x=>x.action==='access.granted'&&x.target==='TESTUSER'));
 assert.ok(audit.some(x=>x.employeeId==='OWNER'));
 
-const employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER'},expect:200})).body.token;
+// Employee IDs no longer provide access until email is verified and a password is created.
+await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:'Unclaimed1!'},expect:409});
+await call('auth/start-activation',{method:'POST',body:{
+ employeeId:'TESTUSER',email:'test.employee@example.com',confirmEmail:'different@example.com',
+ password:employeePassword,confirmPassword:employeePassword},expect:400});
+await call('auth/start-activation',{method:'POST',body:{
+ employeeId:'TESTUSER',email:'test.employee@example.com',confirmEmail:'test.employee@example.com',
+ password:'weak',confirmPassword:'weak'},expect:400});
+await call('auth/start-activation',{method:'POST',body:{
+ employeeId:'TESTUSER',email:'test.employee@example.com',confirmEmail:'test.employee@example.com',
+ password:employeePassword,confirmPassword:employeePassword},expect:200});
+const activateCode=latestEmail('test.employee@example.com','Verify your Inventory Manager account');
+const activationPreview=await call('auth/token-info',{method:'POST',body:{token:activateCode},expect:200});
+assert.equal(activationPreview.body.purpose,'activate');
+await call('auth/complete-token',{method:'POST',body:{token:activateCode},expect:200});
+await call('auth/complete-token',{method:'POST',body:{token:activateCode},expect:400});
+let employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:200})).body.token;
+assert.equal((await call('auth/me',{token:employeeToken})).body.emailVerified,true);
 // Any employee with access to the store can add context to a coworker's checkout.
 const coworkerEdit=await call('movements/'+ownerCheckoutId+'/note',{token:employeeToken,method:'PUT',
  body:{note:'Damaged during repair; display damage confirmed',expectedRevision:1},expect:200});
@@ -142,13 +183,28 @@ audit=(await call('admin/audit',{token:admin})).body;
 assert.ok(audit.some(x=>x.action==='access.revoked'&&x.storeId==='BRANCH2'));
 
 await call('admin/employees/TESTUSER/permissions',{token:admin,method:'PUT',body:{globalAdmin:false,storeAdminIds:['DEFAULT']},expect:200});
-const storeAdmin=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER'},expect:200})).body.token;
+const storeAdmin=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:200})).body.token;
 const scoped=(await call('admin/audit',{token:storeAdmin})).body;
 assert.ok(scoped.every(x=>x.storeId==='DEFAULT'),'Store admins only see their own location activity');
 await call('admin/stores',{token:storeAdmin,method:'POST',body:{id:'NOPE',name:'Should not be created'},expect:403});
+
+// Forgot-password recovery goes only to the already-verified email and invalidates old sessions.
+const unknownReset=await call('auth/forgot-password',{method:'POST',body:{employeeId:'UNKNOWNUSER'},expect:200});
+const knownReset=await call('auth/forgot-password',{method:'POST',body:{employeeId:'TESTUSER'},expect:200});
+assert.equal(unknownReset.body.message,knownReset.body.message,'Reset response must not expose whether an account exists');
+const resetCode=latestEmail('test.employee@example.com','Reset your Inventory Manager password');
+await call('auth/complete-token',{method:'POST',body:{token:resetCode,password:'short',confirmPassword:'short'},expect:400});
+const resetPassword='ChangedPassword2!';
+await call('auth/complete-token',{method:'POST',body:{token:resetCode,password:resetPassword,confirmPassword:resetPassword},expect:200});
+await call('auth/complete-token',{method:'POST',body:{token:resetCode,password:resetPassword,confirmPassword:resetPassword},expect:400});
+await call('auth/me',{token:storeAdmin,expect:401});
+await call('auth/me',{token:employeeToken,expect:401});
+await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:401});
+employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:resetPassword},expect:200})).body.token;
+assert.ok(employeeToken,'New password should permit login');
 
 await call('items/'+id+'/delete',{token:admin,method:'POST',body:{confirmation:'TEST CHARGING KIT'},expect:200});
 audit=(await call('admin/audit',{token:admin})).body;
 assert.ok(audit.some(x=>x.action==='product.deleted'&&x.target===id));
 assert.ok(!(await call('items/export',{token:admin})).body.includes('Test charging kit'));
-console.log('API smoke tests passed: CSV, reorder, checkout note revisions, note permissions, product history, idempotency, audit, scopes and deletion.');
+console.log('API smoke tests passed: password login, first-time email verification, one-use tokens, password reset/session revocation, CSV, checkout notes, store permissions and audit.');
