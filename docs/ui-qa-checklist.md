@@ -38,15 +38,17 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] Original owner can rename `OWNER` to a new ID, log back in as that ID, retain global privileges and remain unable to demote the recovery-owner account.
 - [ ] Restart and `/api/auth/status` after an OWNER rename: app remains initialized and does not create a second OWNER account.
 
-## Five themes and brand identity
+## Ten themes and brand identity
 
-- [ ] Evergreen, Deep Purple, Midnight Ocean, Copper Ember and Rose Noir are available under Settings → Appearance for **every** authenticated employee.
+- [ ] Evergreen, Deep Purple, Midnight Ocean, Copper Ember, Rose Noir, Arctic Slate, Forest Night, Champagne Gold, Crimson Night and Glacier Light are available under Settings → Appearance for **every** authenticated employee.
 - [ ] Each selection applies immediately to backgrounds, panels, navigation, buttons, focus states, logo and favicon; refresh/re-login preserves it.
 - [ ] Separate employees can select different palettes; changing one preference does not modify another's.
 - [ ] Global admin sees Administration → Login screen appearance and can save the public theme. Other roles do not see the control and get HTTP 403 from its API.
 - [ ] The public theme appears on new anonymous page loads, first-time setup, password reset and sign-out. A login restores the employee's personal theme.
 - [ ] Each theme's logo preserves shape/legibility; favicon and meta theme-color match.
-- [ ] Verify readability, keyboard focus, contrast and iOS Safari/mobile navigation across all five palettes.
+- [ ] Glacier Light switches the browser to light color-scheme; typography, tables, tags, buttons, inputs, modals, toasts, warnings and responsive cards remain readable, without light-on-light text.
+- [ ] Glacier Light uses a dark-on-light logo; dark themes retain light-on-dark logos.
+- [ ] Verify readability, keyboard focus, contrast and iOS Safari/mobile navigation across all ten palettes.
 - [ ] Audit log includes `theme.login_changed`; no inventory or account permission changes result from changing appearance.
 
 ## Responsive display
