@@ -8,7 +8,7 @@ Self-hosted barcode inventory application for Windows browsers, mobile browsers,
 - Item creation/editing, categories, descriptions, costs, minimum-stock alerts
 - Atomic check-in/out, nonnegative balances, transaction history, CSV export
 - One-time installation-token enrollment for a shared six-digit PIN
-- Persisted login sessions, PIN hashing, login rate limiting
+- Persisted login sessions, PIN hashing, failure-only login lockouts (5 failed attempts per 5 minutes; success clears the counter)
 - Camera scanning through native BarcodeDetector where browser supports it
 - Online-only PostgreSQL backend; 20-second client refresh
 - Daily compressed PostgreSQL backup script and systemd timer
