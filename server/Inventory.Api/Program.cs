@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -269,6 +271,86 @@ app.MapPut("/api/admin/employees/{id}/permissions",async (HttpContext ctx,string
     }
     await tx.CommitAsync();return Results.Ok(new{updated=true});
 });
+
+static string[] ParseRecipients(string? input)=> (input??"").Split(new[]{',',';','\n','\r'},StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+static bool ValidEmail(string value){try{var a=new MailAddress(value);return a.Address.Equals(value,StringComparison.OrdinalIgnoreCase)&&value.Length<=254;}catch{return false;}}
+async Task<bool> CanManageStore(HttpContext ctx,string store){
+    var who=await Identity(ctx);
+    if(who is null)return false;
+    if(who.Value.globalAdmin)return true;
+    if(!who.Value.admin||who.Value.store!=store)return false;
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employee_store_access WHERE employee_id=@employee AND store_id=@store AND role='store_admin')",c);
+    cmd.Parameters.AddWithValue("employee",who.Value.employee);cmd.Parameters.AddWithValue("store",store);
+    return (bool)(await cmd.ExecuteScalarAsync()??false);
+}
+app.MapGet("/api/alerts/config",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT enabled,recipients FROM store_alert_settings WHERE store_id=@store",c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
+    await using var r=await cmd.ExecuteReaderAsync();
+    bool enabled=false;string recipients="";
+    if(await r.ReadAsync()){enabled=r.GetBoolean(0);recipients=r.GetString(1);}
+    return Results.Ok(new{enabled,recipients,senderConfigured=MailConfigured()});
+});
+app.MapPut("/api/alerts/config",async (HttpContext ctx,AlertSettingsRequest req)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    var recipients=ParseRecipients(req.Recipients);
+    if(recipients.Length>10||recipients.Any(x=>!ValidEmail(x)))return Results.BadRequest("Enter up to 10 valid email addresses separated by commas.");
+    if(req.Enabled&&recipients.Length==0)return Results.BadRequest("Add at least one recipient before enabling alerts.");
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("INSERT INTO store_alert_settings(store_id,enabled,recipients) VALUES(@store,@enabled,@recipients) ON CONFLICT(store_id) DO UPDATE SET enabled=excluded.enabled,recipients=excluded.recipients",c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("enabled",req.Enabled);cmd.Parameters.AddWithValue("recipients",string.Join(",",recipients));
+    await cmd.ExecuteNonQueryAsync();return Results.Ok(new{saved=true});
+});
+app.MapPost("/api/alerts/test",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    if(!MailConfigured())return Results.BadRequest("Gmail SMTP is not configured on the server.");
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT s.name,COALESCE(a.recipients,'') FROM stores s LEFT JOIN store_alert_settings a ON a.store_id=s.id WHERE s.id=@store",c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
+    await using var r=await cmd.ExecuteReaderAsync();
+    if(!await r.ReadAsync())return Results.NotFound();
+    var name=r.GetString(0);var recipients=ParseRecipients(r.GetString(1));
+    if(recipients.Length==0)return Results.BadRequest("Save at least one recipient first.");
+    try{await SendMail(recipients,"Inventory Manager test — "+name,"Test successful. Low-stock notifications for "+name+" will be sent to this address when enabled.");return Results.Ok(new{sent=true});}
+    catch(Exception ex){app.Logger.LogError(ex,"SMTP test failed for {Store}",who.Value.store);return Results.Problem("Email could not be sent. Check the server's SMTP settings and logs.",statusCode:502);}
+});
+bool MailConfigured()=>!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SMTP_USER"))&&!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SMTP_APP_PASSWORD"));
+async Task SendMail(string[] recipients,string subject,string body){
+    var user=Environment.GetEnvironmentVariable("SMTP_USER")??"";
+    var password=Environment.GetEnvironmentVariable("SMTP_APP_PASSWORD")??"";
+    if(!MailConfigured())throw new InvalidOperationException("SMTP credentials missing");
+    using var message=new MailMessage{From=new MailAddress(user),Subject=subject,Body=body,IsBodyHtml=false};
+    foreach(var recipient in recipients)message.To.Add(recipient);
+    using var smtp=new SmtpClient("smtp.gmail.com",587){EnableSsl=true,UseDefaultCredentials=false,Credentials=new NetworkCredential(user,password),Timeout=15000};
+    await smtp.SendMailAsync(message);
+}
+async Task QueueLowStock(NpgsqlConnection c,NpgsqlTransaction tx,Guid itemId,string store){
+    await using var cmd=new NpgsqlCommand("""
+    INSERT INTO low_stock_state(item_id,store_id,is_low)
+    SELECT i.id,i.store_id,(i.quantity<=i.min_stock) FROM items i WHERE i.id=@item AND i.store_id=@store
+    ON CONFLICT(item_id) DO UPDATE SET is_low=excluded.is_low
+    RETURNING is_low
+    """,c,tx);
+    cmd.Parameters.AddWithValue("item",itemId);cmd.Parameters.AddWithValue("store",store);
+    var low=(bool)(await cmd.ExecuteScalarAsync()??false);
+    if(!low)return;
+    await using var queue=new NpgsqlCommand("""
+    INSERT INTO alert_outbox(store_id,item_id,subject,body)
+    SELECT i.store_id,i.id,'Low stock: '||i.name,
+           'Store: '||s.name||E'\\nProduct: '||i.name||E'\\nSKU: '||i.sku||E'\\nCurrent stock: '||i.quantity||E'\\nMinimum stock: '||i.min_stock
+    FROM items i JOIN stores s ON s.id=i.store_id JOIN store_alert_settings a ON a.store_id=i.store_id
+    WHERE i.id=@item AND i.store_id=@store AND a.enabled AND a.recipients<>'' AND
+    NOT EXISTS(SELECT 1 FROM alert_outbox o WHERE o.item_id=i.id AND o.alert_cycle=(SELECT cycle FROM low_stock_state WHERE item_id=i.id))
+    """,c,tx);
+    queue.Parameters.AddWithValue("item",itemId);queue.Parameters.AddWithValue("store",store);
+    await queue.ExecuteNonQueryAsync();
+}
 app.MapGet("/api/items", async (HttpContext ctx) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
@@ -297,6 +379,7 @@ app.MapPost("/api/items", async (HttpContext ctx, NewItem req) =>
         await using var cmd = new NpgsqlCommand("INSERT INTO movements(item_id,delta,before_qty,after_qty,note,store_id,employee_id) VALUES(@id,@delta,0,@delta,'Initial stock',@store,@emp)",c,tx);
         cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("delta",req.Quantity);cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("emp",who.Value.employee);await cmd.ExecuteNonQueryAsync();
     }
+    await QueueLowStock(c,(NpgsqlTransaction)tx,id,who.Value.store);
     await tx.CommitAsync();
     return Results.Created($"/api/items/{id}",new{id});
 });
@@ -330,6 +413,7 @@ app.MapPost("/api/items/{id:guid}/movements", async (HttpContext ctx, Guid id, M
         insert.Parameters.AddWithValue("note",(object?)req.Note??DBNull.Value);insert.Parameters.AddWithValue("key",req.IdempotencyKey);insert.Parameters.AddWithValue("store",who.Value.store);insert.Parameters.AddWithValue("emp",who.Value.employee);
         if (await insert.ExecuteNonQueryAsync()==0) { await tx.RollbackAsync(); return Results.Conflict("Retry request after concurrent transaction"); }
     }
+    await QueueLowStock(c,(NpgsqlTransaction)tx,id,who.Value.store);
     await tx.CommitAsync();
     return Results.Ok(new { before,after });
 });
@@ -372,7 +456,12 @@ app.MapPut("/api/items/{id:guid}", async (HttpContext ctx, Guid id, EditItem req
     cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("sku",req.Sku.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
     cmd.Parameters.AddWithValue("barcode",(req.Barcode??"").Trim());cmd.Parameters.AddWithValue("category",(req.Category??"").Trim());cmd.Parameters.AddWithValue("description",(req.Description??"").Trim());
     cmd.Parameters.AddWithValue("min",req.MinStock);cmd.Parameters.AddWithValue("cost",(object?)req.UnitCost??DBNull.Value);
-    return await cmd.ExecuteNonQueryAsync()==0?Results.NotFound():Results.Ok(new{updated=true});
+    var updated=await cmd.ExecuteNonQueryAsync();
+    if(updated==0)return Results.NotFound();
+    await using var tx=await c.BeginTransactionAsync();
+    await QueueLowStock(c,(NpgsqlTransaction)tx,id,who.Value.store);
+    await tx.CommitAsync();
+    return Results.Ok(new{updated=true});
 });
 
 await using (var c=await Connect())
@@ -380,6 +469,10 @@ await using (var c=await Connect())
     await using var cmd=new NpgsqlCommand("""
     CREATE TABLE IF NOT EXISTS settings(key text PRIMARY KEY,value text NOT NULL);
     CREATE TABLE IF NOT EXISTS stores(id text PRIMARY KEY,name text NOT NULL,active boolean NOT NULL DEFAULT true);
+    CREATE TABLE IF NOT EXISTS store_alert_settings(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,enabled boolean NOT NULL DEFAULT false,recipients text NOT NULL DEFAULT '');
+    CREATE TABLE IF NOT EXISTS low_stock_state(item_id uuid PRIMARY KEY,store_id text NOT NULL,is_low boolean NOT NULL DEFAULT false,cycle bigint NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS alert_outbox(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,store_id text NOT NULL,item_id uuid NOT NULL,alert_cycle bigint NOT NULL DEFAULT 0,subject text NOT NULL,body text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),sent_at timestamptz,attempts integer NOT NULL DEFAULT 0,next_attempt timestamptz NOT NULL DEFAULT now());
+    CREATE UNIQUE INDEX IF NOT EXISTS alert_outbox_item_cycle_idx ON alert_outbox(item_id,alert_cycle);
     INSERT INTO stores(id,name) SELECT 'DEFAULT','Original Store' WHERE NOT EXISTS(SELECT 1 FROM stores) ON CONFLICT DO NOTHING;
     CREATE TABLE IF NOT EXISTS employees(store_id text NOT NULL REFERENCES stores(id),id text NOT NULL,name text NOT NULL,active boolean NOT NULL DEFAULT true,PRIMARY KEY(store_id,id));
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS primary_store_id text;
@@ -427,5 +520,6 @@ record StoreRequest(string? Id,string? Name);
 record EmployeeRequest(string? StoreId,string? Id,string? Name);
 
 record StoreNameRequest(string? Name);
+record AlertSettingsRequest(bool Enabled,string? Recipients);
 
 record EmployeePermissions(bool GlobalAdmin,string[]? StoreAdminIds);
