@@ -22,10 +22,11 @@ The application provides a per-store reorder list, CSV exports, audit logging an
 
 ## Authentication and administration
 
-- First setup creates a shared six-digit administrator PIN using the setup token. An `OWNER` global admin is seeded in the default `DEFAULT` store.
-- Global admins log in with their employee ID and PIN. Global admins control store management and the shared Gmail sender.
+- Initial setup uses the one-time server `SETUP_TOKEN` to create an OWNER administrator email/password; `OWNER` is seeded in the `DEFAULT` store. The setup-token owner may configure Gmail before verifying the bootstrap mailbox.
+- Global admins and employees sign in using their employee ID and individual password. Global admins manage stores and the shared Gmail sender.
 - Store-admin access is scoped to the current store. Employees have store grants and a primary store.
-- **Known significant security limitation:** Ordinary employee sign-in currently requires an employee ID only, and store-admin privileges can be associated with these sessions. Employee IDs are not secure credentials. Do not expose sensitive inventory operations to untrusted networks without an additional security layer and/or improving user authentication. See the security section of the deployment guide.
+- **Known security limitation:** Employee accounts self-enroll using an unused employee ID, matching email/password fields, and a 24-hour single-use email verification link. Whoever claims an unactivated employee ID first can register their email address, so email verification proves mailbox access rather than employee identity. Restrict onboarding appropriately, especially for store admins.
+- Per-user password hashes use salted PBKDF2-SHA256; one-time activation and reset tokens are stored as SHA256 hashes and expire after 24 hours and 30 minutes respectively. Password reset revokes old sessions; browser inactivity is limited to 15 minutes with matching server expiry and no visible countdown. The old PIN and ID-only sessions are invalidated on initial migration.
 - Login/session and OAuth/token fields are protected within PostgreSQL to the extent specified by the current implementation. Protect the host's private `.env`, including `GOOGLE_TOKEN_KEY`, alongside database backups.
 
 ## Scope and limitations
