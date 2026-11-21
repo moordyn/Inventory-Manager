@@ -129,6 +129,19 @@ jobs:
               importer.includes('https://zagginventorymanager.com')) {
             throw new Error('Bring-your-own-domain installer, Compose or Google import is not wired correctly');
           }
+          if (!backend.includes('/api/auth/start-activation') ||
+              !backend.includes('/api/auth/forgot-password') ||
+              !backend.includes('/api/auth/complete-token') ||
+              !backend.includes("SessionIdleMinutes=15") ||
+              !backend.includes("app.MapPost(\"/api/auth/login\",()=>Results.StatusCode(StatusCodes.Status410Gone))")) {
+            throw new Error('v1.1.0 account activation, recovery, 15-minute sessions, and retired PIN route missing');
+          }
+          if (!html.includes("const IDLE_LIMIT_MS=15*60*1000") ||
+              !html.includes('id="registrationForm"') ||
+              !html.includes('id="forgotForm"') ||
+              !html.includes('id="authTokenForm"')) {
+            throw new Error('v1.1.0 account UI or silent 15-minute session timeout missing');
+          }
           for (const marker of [
             'data-edit-checkout-note', 'data-save-checkout-note',
             'data-view-checkout-revisions', 'function noteCellMarkup(entry)',
@@ -160,8 +173,11 @@ jobs:
           SETUP_TOKEN: 0123456789abcdef0123456789abcdef01234567
           GOOGLE_TOKEN_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
           PUBLIC_ORIGIN: https://inventory.example.com
+          ASPNETCORE_ENVIRONMENT: IntegrationTest
+          AUTH_EMAIL_TEST_OUTBOX: /tmp/inventory-manager-email-outbox.jsonl
         run: |
           bash -n deploy/install.sh deploy/configure-google.sh deploy/backup.sh
+          rm -f "$AUTH_EMAIL_TEST_OUTBOX"
           node --check tests/api-smoke.mjs
           node tests/checkout-note-ui.mjs
           dotnet run --project server/Inventory.Api/Inventory.Api.csproj --configuration Release --no-build > /tmp/zagg-api.log 2>&1 &
