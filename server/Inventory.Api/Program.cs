@@ -346,7 +346,7 @@ app.MapGet("/api/admin/google-oauth/config",async (HttpContext ctx)=>{
         return Results.Ok(new{configured=GoogleReady(),clientId,source="dashboard",updatedAt,encryptionReady=googleKey is {Length:32}});
     }
     return Results.Ok(new{configured=GoogleReady(),clientId=GoogleReady()?googleCredentials.ClientId:null,source=GoogleReady()?"server":"none",updatedAt=(DateTime?)null,encryptionReady=googleKey is {Length:32}});
-}).RequireRateLimiting("auth");
+});
 
 app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthImportRequest req)=>{
     var who=await Identity(ctx);
