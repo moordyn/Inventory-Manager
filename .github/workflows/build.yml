@@ -84,6 +84,11 @@ jobs:
               if (!svg.includes('<svg') || !svg.includes('viewBox=')) throw new Error('Invalid theme branding: '+asset+theme);
             }
           }
+          for (const marker of ['id="loginAurora"', 'class="login-aurora"',
+              "const loginAurora=(()=>{", "canvas.parentElement.addEventListener('pointermove'",
+              "matchMedia('(prefers-reduced-motion: reduce)')", "loginAurora.stop()", "loginAurora.start()"]) {
+            if (!html.includes(marker)) throw new Error('Login aurora visual or lifecycle missing: '+marker);
+          }
           for (const marker of ['id="myThemeChoices"','id="loginThemeChoices"',
               'data-theme-choice=', 'function setTheme(theme)', 'themeMarkup(active)']) {
             if (!html.includes(marker)) throw new Error('Theme selector missing: '+marker);
