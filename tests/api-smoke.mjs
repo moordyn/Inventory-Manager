@@ -278,7 +278,7 @@ const createKey=randomUUID();
 const repairBody={
  device:'iPhone 14 Pro',repairType:'Soft OLED replacement',quotedTotal:120,paidUpfront:30,
  customerName:'Example Customer',customerContact:'555-0100',serialNumber:'TEST-SERIAL-1',
- notes:'Replace display and test touch',assignedTo:'RENAMEDUSER',idempotencyKey:createKey
+ notes:'Replace display and test touch',idempotencyKey:createKey
 };
 await call('repairs',{token:admin,method:'POST',body:{...repairBody,paidUpfront:150,idempotencyKey:randomUUID()},expect:400});
 const createdRepair=(await call('repairs',{token:admin,method:'POST',body:repairBody,expect:201})).body.id;
@@ -294,16 +294,14 @@ assert.deepEqual(repairQueue.map(r=>r.id),[createdRepair,laterRepair],'Active re
 assert.equal(repairQueue[0].createdBy,'OWNER');
 assert.equal(repairQueue[0].paidUpfront,30);
 assert.equal(repairQueue[0].balanceDue,90);
-assert.ok((await call('repairs/technicians',{token:admin})).body.some(x=>x.id==='RENAMEDUSER'));
+await call('repairs/technicians',{token:admin,expect:404});
 let detail=(await call('repairs/'+createdRepair,{token:admin})).body;
 assert.equal(detail.ticket.serialNumber,'TEST-SERIAL-1');
 assert.equal(detail.ticket.createdBy,'OWNER');
-assert.equal(detail.ticket.assignedTo,'RENAMEDUSER');
+assert.equal(detail.ticket.assignedTo,'OWNER');
 await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'invalid'},expect:400});
 await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'in_progress'},expect:200});
-await call('repairs/'+createdRepair+'/assign',{token:admin,method:'PUT',body:{employeeId:'NOT_EMPLOYEE'},expect:400});
-await call('repairs/'+createdRepair+'/assign',{token:admin,method:'PUT',body:{employeeId:null},expect:200});
-await call('repairs/'+createdRepair+'/assign',{token:admin,method:'PUT',body:{employeeId:'RENAMEDUSER'},expect:200});
+await call('repairs/'+createdRepair+'/assign',{token:admin,method:'PUT',body:{employeeId:'RENAMEDUSER'},expect:404});
 const partKey1=randomUUID(),partKey2=randomUUID();
 const consumed1=(await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
  itemId:id,quantity:1,idempotencyKey:partKey1
@@ -382,7 +380,7 @@ assert.ok(!(await call('items/export',{token:admin})).body.includes('Test chargi
 // OWNER may rename their own account without losing global privileges or creating a new bootstrap.
 const ownerRenamedRepair=(await call('repairs',{token:admin,method:'POST',body:{
  device:'Repair employee ID migration check',repairType:'Service',quotedTotal:0,
- paidUpfront:0,assignedTo:'OWNER',idempotencyKey:randomUUID()
+ paidUpfront:0,idempotencyKey:randomUUID()
 },expect:201})).body.id;
 await call('admin/employees/OWNER/id',{token:admin,method:'PUT',body:{newId:'PRIMARYADMIN'},expect:200});
 await call('auth/me',{token:admin,expect:401});
