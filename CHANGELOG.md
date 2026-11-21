@@ -10,7 +10,7 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 
 - Added a separate passive signed-in dashboard background with more prominent, overlapping drifting theme-colored light clouds, slightly translucent/blurred surfaces, fixed-size viewport rendering, capped frame rate, reduced-motion fallback and no pointer interaction.
-- Animated theme-aware sign-in aurora: ambient drifting color clouds and pointer/touch light trails, with a reduced-motion fallback, paused background rendering and mobile-friendly frame caps.
+- Replaced the login screen's glow-trail aurora with a WebGL2 fluid-smoke simulation: drag-injected colored dye and momentum, vorticity, pressure projection, autonomous drift, theme-matched backgrounds (including Glacier Light), and a static reduced-motion/WebGL fallback.
 - Added ten cohesive palettes: Evergreen (mint), Deep Purple, Midnight Ocean, Copper Ember, Rose Noir, Arctic Slate, Forest Night, Champagne Gold, Crimson Night, and Glacier Light (**light mode**).
 - Employees choose their own persistent dashboard palette from **Settings → Appearance**, maintained by server-side account preferences and applied across devices.
 - Global administrators select the public sign-in/activation theme, independently of individual employee preferences; changes are audited and protected by a role-checked API.
