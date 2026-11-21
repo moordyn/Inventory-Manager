@@ -12,7 +12,9 @@ const canPickup=t=>!t.pickedUpAt&&(t.status==='completed'||t.status==='ready');
 const displayStatus=t=>t.pickedUpAt?'Paid / Picked Up':canPickup(t)?'Completed · Awaiting Pickup':status(t.status);
 const status=v=>STATUS[v]||v;
 function reset(){
- version++;rows=[];historical=false;cameraTicketId=null;loading=false;
+ version++;overviewVersion++;rows=[];historical=false;cameraTicketId=null;loading=false;
+ if($r('overviewRepairActive'))for(const id of ['overviewRepairActive','overviewRepairProgress','overviewRepairPickup','overviewRepairBalance'])$r(id).textContent='—';
+ if($r('overviewRepairTickets'))$r('overviewRepairTickets').innerHTML='<div class="empty">Loading repairs…</div>';
  if($r('repairShowHistory'))$r('repairShowHistory').checked=false;
  if($r('repairSearch'))$r('repairSearch').value='';
  if($r('repairQueueList'))$r('repairQueueList').innerHTML='<div class="empty">Open the Repairs tab to load this location.</div>';
@@ -39,10 +41,41 @@ function renderList(){
     (canPickup(r)?'<button type="button" class="btn primary" data-repair-pickup="'+Number(r.id)+'">Mark Paid / Picked Up</button>':'')+'</div></div></article>'
  ).join(''):'<div class="empty">'+(historical?'No paid/picked-up or cancelled repairs.':'No active repairs at this location.')+'</div>';
 }
+let overviewVersion=0;
+function overviewRender(data){
+ const active=$r('overviewRepairActive'),progress=$r('overviewRepairProgress'),pickup=$r('overviewRepairPickup'),
+       balance=$r('overviewRepairBalance'),list=$r('overviewRepairTickets'),message=$r('overviewRepairMessage');
+ if(!active||!progress||!pickup||!balance||!list||!message)return;
+ active.textContent=String(data.length);
+ progress.textContent=String(data.filter(r=>r.status==='in_progress').length);
+ pickup.textContent=String(data.filter(r=>r.status==='ready'||r.status==='completed').length);
+ balance.textContent=usd(data.reduce((sum,r)=>sum+Math.max(0,Number(r.balanceDue||0)),0));
+ message.textContent=data.length?'Showing the first '+Math.min(4,data.length)+' repairs in check-in order.':'No active repairs at this store.';
+ list.innerHTML=data.length?data.slice(0,4).map(r=>
+  '<div class="overview-repair-entry"><div><small>Repair #'+Number(r.id)+' · '+safe(time(r.createdAt))+'</small>'+
+  '<h3>'+safe(r.device)+' · '+safe(r.repairType)+'</h3>'+
+  '<small>'+safe(displayStatus(r))+' · '+safe(r.createdByName||r.createdBy)+'</small></div>'+
+  '<div class="overview-repair-entry-money"><strong>'+usd(r.balanceDue)+' due</strong>'+
+  '<small>'+usd(r.quotedTotal)+' quoted · '+usd(r.paidUpfront)+' upfront</small></div></div>'
+ ).join(''):'<div class="empty">No repairs in the active queue.</div>';
+}
+async function refreshOverview(){
+ if(!identity)return;
+ const stamp=++overviewVersion,store=identity.storeId;
+ try{
+  const data=await api('repairs?history=false');
+  if(stamp!==overviewVersion||!identity||identity.storeId!==store)return;
+  overviewRender(data);
+ }catch(err){
+  if(stamp!==overviewVersion||!identity||identity.storeId!==store)return;
+  const el=$r('overviewRepairMessage');
+  if(el)el.textContent='Unable to load repairs: '+err.message;
+ }
+}
 async function refresh(){
  if(loading||!identity||!$r('view-repairs')?.classList.contains('active'))return;
  const stamp=++version,store=identity.storeId;loading=true;
- try{const next=await api('repairs?history='+historical);if(stamp!==version||store!==identity.storeId)return;rows=next;renderList();}
+ try{const next=await api('repairs?history='+historical);if(stamp!==version||store!==identity.storeId)return;rows=next;renderList();void refreshOverview();}
  catch(err){if(stamp===version){$r('repairQueueList').innerHTML='<div class="empty">'+safe(err.message)+'</div>';toast('Repair queue: '+err.message,true)}}
  finally{loading=false}
 }
@@ -212,5 +245,5 @@ $r('repairQueueList').onclick=e=>{
  const btn=e.target.closest('[data-repair-open]');
  if(btn)void openTicket(Number(btn.dataset.repairOpen));
 };
-window.RepairQueue={open:refresh,refresh,reset,handleCameraScan};
+window.RepairQueue={open:refresh,refresh,refreshOverview,reset,handleCameraScan};
 })();
