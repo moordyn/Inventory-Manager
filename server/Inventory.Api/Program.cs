@@ -407,7 +407,7 @@ app.MapGet("/api/alerts/config",async (HttpContext ctx)=>{
     await using var googleCmd=new NpgsqlCommand("SELECT email FROM google_store_accounts WHERE store_id=@store",c);
     googleCmd.Parameters.AddWithValue("store",who.Value.store);
     var googleEmail=(string?)await googleCmd.ExecuteScalarAsync();
-    return Results.Ok(new{enabled,recipients,senderConfigured=MailConfigured()||googleEmail is not null,googleConfigured=GoogleReady(),googleEmail});
+    return Results.Ok(new{enabled,recipients,senderConfigured=MailConfigured()||(googleEmail is not null&&GoogleReady()),googleConfigured=GoogleReady(),googleEmail});
 });
 app.MapPut("/api/alerts/config",async (HttpContext ctx,AlertSettingsRequest req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
@@ -432,8 +432,15 @@ app.MapPost("/api/alerts/test",async (HttpContext ctx)=>{
     var name=r.GetString(0);var recipients=ParseRecipients(r.GetString(1));
     if(recipients.Length==0)return Results.BadRequest("Save at least one recipient first.");
     var hasGoogle=!r.IsDBNull(2);
-    try{await SendMail(recipients,"Inventory Manager test — "+name,"Test successful. Low-stock notifications for "+name+" will be sent to this address when enabled.");return Results.Ok(new{sent=true});}
-    catch(Exception ex){app.Logger.LogError(ex,"SMTP test failed for {Store}",who.Value.store);return Results.Problem("Email could not be sent. Check the server's SMTP settings and logs.",statusCode:502);}
+    if(!hasGoogle&&!MailConfigured())return Results.BadRequest("Connect Google for this store before sending a test email.");
+    try{
+        var subject="Inventory Manager test — "+name;
+        var body="Test successful. Low-stock notifications for "+name+" will be sent to this address when enabled.";
+        if(hasGoogle){if(!GoogleReady())return Results.BadRequest("Google OAuth server credentials are incomplete.");await SendGmail(who.Value.store,recipients,subject,body);}
+        else await SendMail(recipients,subject,body);
+        return Results.Ok(new{sent=true});
+    }
+    catch(Exception ex){app.Logger.LogError(ex,"Email test failed for store {Store}",who.Value.store);return Results.Problem("Email could not be sent. Check the connected Google account or server email settings.",statusCode:502);}
 });
 bool MailConfigured()=>!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SMTP_USER"))&&!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SMTP_APP_PASSWORD"));
 async Task SendMail(string[] recipients,string subject,string body){
