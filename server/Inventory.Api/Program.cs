@@ -239,11 +239,14 @@ app.MapGet("/api/admin/stores",async (HttpContext ctx)=>{
     return Results.Ok(list);
 });
 app.MapPost("/api/admin/stores",async (HttpContext ctx,StoreRequest req)=>{
-    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.Forbid();
     if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid store details");
-    await using var c=await Connect();await using var cmd=new NpgsqlCommand("INSERT INTO stores(id,name) VALUES(@id,@name)",c);
+    await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
+    await using var cmd=new NpgsqlCommand("INSERT INTO stores(id,name) VALUES(@id,@name)",c,tx);
     cmd.Parameters.AddWithValue("id",req.Id.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
-    await cmd.ExecuteNonQueryAsync();return Results.Ok(new{created=true});
+    await cmd.ExecuteNonQueryAsync();
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,req.Id!.Trim(),"store.created",req.Id!.Trim(),req.Name!.Trim());
+    await tx.CommitAsync();return Results.Ok(new{created=true});
 });
 app.MapPut("/api/admin/stores/{id}/name",async (HttpContext ctx,string id,StoreNameRequest req)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
@@ -255,7 +258,7 @@ app.MapPut("/api/admin/stores/{id}/name",async (HttpContext ctx,string id,StoreN
     return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{updated=true}):Results.NotFound();
 });
 app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreRequest req)=>{
-    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.Forbid();
     var newId=req.Id?.Trim();var name=req.Name?.Trim();
     if(newId is null||!Regex.IsMatch(newId,@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(name)||name.Length>100)
         return Results.BadRequest("Store ID must be 2–24 letters, numbers, hyphens or underscores; name must be 1–100 characters.");
@@ -290,6 +293,7 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
             remove.Parameters.AddWithValue("oldId",id);await remove.ExecuteNonQueryAsync();
         }
     }
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,newId,"store.updated",newId,id==newId?"Store name changed":"Store ID changed from "+id);
     await tx.CommitAsync();return Results.Ok(new{id=newId,name});
 });
 app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
@@ -303,21 +307,26 @@ app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();if(!who.Value.globalAdmin&&who.Value.store!=req.StoreId)return Results.Forbid();
     if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.StoreId)||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid employee details");
     await using var c=await Connect();
+    await using var tx=await c.BeginTransactionAsync();
     await using(var duplicate=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@id)",c)){duplicate.Parameters.AddWithValue("id",req.Id.Trim());if((bool)(await duplicate.ExecuteScalarAsync()??false))return Results.Conflict("Employee ID already exists. IDs must be unique across all stores.");}
-    await using var cmd=new NpgsqlCommand("INSERT INTO employees(store_id,primary_store_id,id,name) VALUES(@store,@store,@id,@name)",c);
+    await using var cmd=new NpgsqlCommand("INSERT INTO employees(store_id,primary_store_id,id,name) VALUES(@store,@store,@id,@name)",c,tx);
     cmd.Parameters.AddWithValue("store",req.StoreId.Trim());cmd.Parameters.AddWithValue("id",req.Id.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
     await cmd.ExecuteNonQueryAsync();
-    await using var access=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id) VALUES(@employee,@store)",c);
+    await using var access=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id) VALUES(@employee,@store)",c,tx);
     access.Parameters.AddWithValue("employee",req.Id.Trim());access.Parameters.AddWithValue("store",req.StoreId.Trim());await access.ExecuteNonQueryAsync();
-    return Results.Ok(new{created=true});
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,req.StoreId!.Trim(),"employee.created",req.Id!.Trim(),req.Name!.Trim());
+    await tx.CommitAsync();return Results.Ok(new{created=true});
 });
 
 app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,SelectStore req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();if(!who.Value.globalAdmin&&who.Value.store!=req.StoreId)return Results.Forbid();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id) VALUES(@employee,@store) ON CONFLICT DO NOTHING",c);
+    await using var tx=await c.BeginTransactionAsync();
+    await using var cmd=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id) VALUES(@employee,@store) ON CONFLICT DO NOTHING",c,tx);
     cmd.Parameters.AddWithValue("employee",id);cmd.Parameters.AddWithValue("store",req.StoreId??"");
-    await cmd.ExecuteNonQueryAsync();return Results.Ok(new{assigned=true});
+    var inserted=await cmd.ExecuteNonQueryAsync();
+    if(inserted>0)await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,req.StoreId,"access.granted",id,"Granted additional store access");
+    await tx.CommitAsync();return Results.Ok(new{assigned=true});
 });
 // Additional store access can be revoked, but an employee must retain their primary location.
 app.MapDelete("/api/admin/employees/{id}/stores/{storeId}",async (HttpContext ctx,string id,string storeId)=>{
@@ -344,6 +353,7 @@ app.MapDelete("/api/admin/employees/{id}/stores/{storeId}",async (HttpContext ct
         remove.Parameters.AddWithValue("store",storeId);
         if(await remove.ExecuteNonQueryAsync()!=1)return Results.NotFound("The employee does not have access to this store.");
     }
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,storeId,"access.revoked",id,"Removed additional store access");
     await tx.CommitAsync();
     return Results.Ok(new{removed=true,employeeId=id,storeId});
 });
@@ -373,6 +383,7 @@ app.MapPut("/api/admin/employees/{id}/permissions",async (HttpContext ctx,string
         set.Parameters.AddWithValue("id",id);set.Parameters.AddWithValue("store",store);
         await set.ExecuteNonQueryAsync();
     }
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,null,"employee.permissions",id,"Global admin: "+req.GlobalAdmin+"; store admin locations: "+string.Join(", ",req.StoreAdminIds??Array.Empty<string>()));
     await tx.CommitAsync();return Results.Ok(new{updated=true});
 });
 
@@ -601,9 +612,12 @@ app.MapPut("/api/alerts/config",async (HttpContext ctx,AlertSettingsRequest req)
     if(recipients.Length>10||recipients.Any(x=>!ValidEmail(x)))return Results.BadRequest("Enter up to 10 valid email addresses separated by commas.");
     if(req.Enabled&&recipients.Length==0)return Results.BadRequest("Add at least one recipient before enabling alerts.");
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("INSERT INTO store_alert_settings(store_id,enabled,recipients) VALUES(@store,@enabled,@recipients) ON CONFLICT(store_id) DO UPDATE SET enabled=excluded.enabled,recipients=excluded.recipients",c);
+    await using var tx=await c.BeginTransactionAsync();
+    await using var cmd=new NpgsqlCommand("INSERT INTO store_alert_settings(store_id,enabled,recipients) VALUES(@store,@enabled,@recipients) ON CONFLICT(store_id) DO UPDATE SET enabled=excluded.enabled,recipients=excluded.recipients",c,tx);
     cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("enabled",req.Enabled);cmd.Parameters.AddWithValue("recipients",string.Join(",",recipients));
-    await cmd.ExecuteNonQueryAsync();return Results.Ok(new{saved=true});
+    await cmd.ExecuteNonQueryAsync();
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,who.Value.store,"alerts.updated",who.Value.store,(req.Enabled?"Enabled":"Disabled")+"; "+recipients.Length+" recipient(s)");
+    await tx.CommitAsync();return Results.Ok(new{saved=true});
 });
 app.MapPost("/api/alerts/test",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
@@ -881,6 +895,7 @@ app.MapPost("/api/items/{id:guid}/delete",async (HttpContext ctx,Guid id,DeleteI
     await update.ExecuteNonQueryAsync();
     await using var pending=new NpgsqlCommand("DELETE FROM alert_outbox WHERE item_id=@id AND sent_at IS NULL",c,tx);
     pending.Parameters.AddWithValue("id",id);await pending.ExecuteNonQueryAsync();
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,who.Value.store,"product.deleted",id.ToString(),name);
     await tx.CommitAsync();
     app.Logger.LogInformation("Product {ProductId} archived by employee {Employee} in store {Store}",id,who.Value.employee,who.Value.store);
     return Results.Ok(new{deleted=true});
