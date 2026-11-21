@@ -21,9 +21,9 @@ The first-run installer **prompts for your own canonical HTTPS `PUBLIC_ORIGIN`**
 sudo PUBLIC_ORIGIN=https://inventory.example.com bash /tmp/inventory-install.sh
 ~~~
 
-4. The installer creates a private `/opt/inventory-manager/.env`, random database/setup secrets, Docker containers, and a daily backup timer. It **does not** register the domain, create DNS records, configure firewall/proxy/SSL or create a Google OAuth project.
+4. The installer creates a private `/opt/inventory-manager/.env`, random database/setup secrets, Docker containers, and a daily backup timer. On v1.0.0-to-v1.1.0 upgrades, the original `SETUP_TOKEN` is required once for OWNER email/password bootstrap; previous PIN/ID-only sessions are revoked. It **does not** register the domain, create DNS records, configure firewall/proxy/SSL or create a Google OAuth project.
 5. Configure DNS and HTTPS reverse proxy for **your exact hostname**, forwarding to the app host at `http://INVENTORY_LXC_IP:18424`. Keep app, database, and proxy admin ports off the public Internet.
-6. Open the app, enter the one-time setup token and create the six-digit admin PIN. Log in as `OWNER` to configure stores and employees.
+6. Open the app and use the one-time installation token to create the **OWNER** administrator's email and password (both entered twice). Log in as `OWNER` with that password. Once Gmail is connected, verify the OWNER mailbox under **Settings → Account security**.
 
 ## Google OAuth and Gmail alerts (optional)
 
@@ -34,7 +34,7 @@ This is **bring your own Google Cloud**:
 - Authorized JavaScript origin = **your own `PUBLIC_ORIGIN`**.
 - Authorized redirect URI = **`PUBLIC_ORIGIN + /api/google/callback`**.
 - Download **your own** OAuth Web client JSON **after** saving.
-- Sign in to your app as global admin, open **Administration → Google OAuth configuration**, import the file and confirm PIN, then click **Connect global Gmail**.
+- Sign in to your app as global admin, open **Administration → Google OAuth configuration**, import the file and confirm your administrator account password, then click **Connect global Gmail**.
 - Configure separate alert recipients and test mail per store.
 
 You do **not** need the original developer's domain or Google Client ID/secret. Do not commit the OAuth JSON or private `.env` to GitHub.
@@ -51,4 +51,4 @@ sudo systemctl status inventory-backup.timer
 
 `PUBLIC_ORIGIN`, database data and encryption secrets persist across normal updates. Legacy installations may have a compatibility origin; to move domains, update the `PUBLIC_ORIGIN` line in `.env`, DNS, TLS proxy and the Google OAuth client together.
 
-**Security:** Employee ID-only login in the current app is not sufficient protection for sensitive Internet-exposed operations. Use stronger authentication/access controls before public production use. Read the [full security and backup/restore sections](COMPLETE_DEPLOYMENT_GUIDE.md).
+**Security:** Employees now use employee ID + password and emailed activation links. First-time activation is still first-claim: someone knowing an unused employee ID could register an email first. Restrict account setup to trusted networks or use an appropriate access gateway. Read the [full security and backup/restore sections](COMPLETE_DEPLOYMENT_GUIDE.md).
