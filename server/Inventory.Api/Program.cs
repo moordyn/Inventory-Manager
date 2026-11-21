@@ -408,9 +408,9 @@ async Task<bool> CanManageStore(HttpContext ctx,string store){
     return (bool)(await cmd.ExecuteScalarAsync()??false);
 }
 
-// Canonical external HTTPS origin is configured per installation, never inferred from untrusted Host headers.
-// Use the original production domain only as a compatibility default for pre-PUBLIC_ORIGIN installs.
-var publicOriginText=Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"https://zagginventorymanager.com";
+// Canonical external HTTPS origin is configured by the installing business.
+// Never infer it from untrusted request Host headers or silently use someone else's domain.
+var publicOriginText=Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"";
 if(!Uri.TryCreate(publicOriginText,UriKind.Absolute,out Uri? publicOriginUri)
    || publicOriginUri.Scheme!=Uri.UriSchemeHttps
    || publicOriginUri.HostNameType!=UriHostNameType.Dns
