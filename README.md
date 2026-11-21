@@ -28,7 +28,14 @@ bash /tmp/inventory-install.sh
 ```
 The installer retains the database volume and PIN and generates secrets only on first installation. Initial setup requires the one-time token printed by the installer.
 
-Nginx Proxy Manager forwards `https://inv.mrmschf.xyz` to `http://INVENTORY_LXC_IP:18424`. Only ports 80/443 should be forwarded to Nginx; never forward 18424, 81, or 5432 publicly.
+Nginx Proxy Manager forwards `https://zagginventorymanager.com` to `http://INVENTORY_LXC_IP:18424`. Only ports 80/443 should be forwarded to Nginx; never forward 18424, 81, or 5432 publicly.
+
+### Public domain migration (Cloudflare + OPNsense)
+
+The application now uses **`https://zagginventorymanager.com`** as its canonical public URL. The previous `inv.mrmschf.xyz` hostname is retired and should no longer be used for Google OAuth. Configure Cloudflare DNS for the **apex/root domain** (`@`) and let the OPNsense DDNS Cloudflare account keep its A record current. Point an Nginx Proxy Manager proxy host for `zagginventorymanager.com` to the existing Inventory Manager server at port **18424**, enable an HTTPS certificate, and use Cloudflare **Full (strict)** with a valid origin certificate. Do not expose port 18424 directly to the internet.
+
+In Google Cloud, authorize **`https://zagginventorymanager.com`** as a JavaScript origin and **`https://zagginventorymanager.com/api/google/callback`** as a redirect URI. Add `zagginventorymanager.com` to Authorized domains where required. The same existing Google OAuth Client ID and Secret remain valid; you **do not need a new API key or OAuth client** just for the hostname change. Previously encrypted Gmail refresh tokens remain in PostgreSQL and are not modified by deployment. If reimporting the Google OAuth client JSON, download a fresh JSON file after saving the new origin and redirect URI in Google Cloud.
+
 
 ## Project layout
 - `server/Inventory.Api`: ASP.NET Core 10 API and web interface
@@ -73,7 +80,7 @@ Alerts are queued when a product is at or below its minimum stock threshold and 
 4. In that same global section, click **Connect global Gmail** and authorize the one Gmail account to send notifications for all stores.
 5. Store administrators can now open **Administration → Low-stock email alerts**, type their own recipient addresses, enable alerts, save, and click **Send test email**. They have no access to the sending Gmail connection.
 
-The Gmail authorization uses `https://www.googleapis.com/auth/gmail.send` and the OAuth Web application's redirect `https://inv.mrmschf.xyz/api/google/callback`. In Google Cloud, enable Gmail API, use an **External** audience if connecting ordinary Gmail accounts, and include any required test users. Google's **Testing** publishing status can result in refresh tokens expiring after seven days; production use may require verification.
+The Gmail authorization uses `https://www.googleapis.com/auth/gmail.send` and the OAuth Web application's redirect `https://zagginventorymanager.com/api/google/callback`. In Google Cloud, enable Gmail API, use an **External** audience if connecting ordinary Gmail accounts, and include any required test users. Google's **Testing** publishing status can result in refresh tokens expiring after seven days; production use may require verification.
 
 **Upgrade note:** Prior per-store Google sender authorizations are retained as legacy data but are **no longer used** for outgoing mail. A global administrator must connect the global sender once after upgrading. Existing per-store recipient addresses and alert settings are preserved.
 
