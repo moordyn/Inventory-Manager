@@ -202,7 +202,7 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
             create.Parameters.AddWithValue("newId",newId);create.Parameters.AddWithValue("name",name);create.Parameters.AddWithValue("oldId",id);
             await create.ExecuteNonQueryAsync();
         }
-        foreach(var table in new[]{"items","movements","employees","employee_store_access","sessions"}){
+        foreach(var table in new[]{"items","movements","employees","employee_store_access","sessions","low_stock_state","alert_outbox"}){
             await using var move=new NpgsqlCommand($"UPDATE {table} SET store_id=@newId WHERE store_id=@oldId",c,tx);
             move.Parameters.AddWithValue("newId",newId);move.Parameters.AddWithValue("oldId",id);
             await move.ExecuteNonQueryAsync();
@@ -334,15 +334,15 @@ async Task QueueLowStock(NpgsqlConnection c,NpgsqlTransaction tx,Guid itemId,str
     await using var cmd=new NpgsqlCommand("""
     INSERT INTO low_stock_state(item_id,store_id,is_low)
     SELECT i.id,i.store_id,(i.quantity<=i.min_stock) FROM items i WHERE i.id=@item AND i.store_id=@store
-    ON CONFLICT(item_id) DO UPDATE SET is_low=excluded.is_low
+    ON CONFLICT(item_id) DO UPDATE SET cycle=CASE WHEN low_stock_state.is_low=false AND excluded.is_low=true THEN low_stock_state.cycle+1 ELSE low_stock_state.cycle END,is_low=excluded.is_low
     RETURNING is_low
     """,c,tx);
     cmd.Parameters.AddWithValue("item",itemId);cmd.Parameters.AddWithValue("store",store);
     var low=(bool)(await cmd.ExecuteScalarAsync()??false);
     if(!low)return;
     await using var queue=new NpgsqlCommand("""
-    INSERT INTO alert_outbox(store_id,item_id,subject,body)
-    SELECT i.store_id,i.id,'Low stock: '||i.name,
+    INSERT INTO alert_outbox(store_id,item_id,alert_cycle,subject,body)
+    SELECT i.store_id,i.id,(SELECT cycle FROM low_stock_state WHERE item_id=i.id),'Low stock: '||i.name,
            'Store: '||s.name||E'\\nProduct: '||i.name||E'\\nSKU: '||i.sku||E'\\nCurrent stock: '||i.quantity||E'\\nMinimum stock: '||i.min_stock
     FROM items i JOIN stores s ON s.id=i.store_id JOIN store_alert_settings a ON a.store_id=i.store_id
     WHERE i.id=@item AND i.store_id=@store AND a.enabled AND a.recipients<>'' AND
@@ -464,6 +464,38 @@ app.MapPut("/api/items/{id:guid}", async (HttpContext ctx, Guid id, EditItem req
     return Results.Ok(new{updated=true});
 });
 
+// Delivery loop runs on the API host; inventory operations never depend on Gmail availability.
+var mailCts=new CancellationTokenSource();
+app.Lifetime.ApplicationStopping.Register(()=>mailCts.Cancel());
+_ = Task.Run(async ()=>{
+    while(!mailCts.IsCancellationRequested){
+        try{
+            if(MailConfigured()){
+                await using var c=await Connect();
+                await using var cmd=new NpgsqlCommand("""
+                SELECT o.id,o.store_id,o.subject,o.body,a.recipients
+                FROM alert_outbox o JOIN store_alert_settings a ON a.store_id=o.store_id
+                WHERE o.sent_at IS NULL AND o.next_attempt<=now() AND a.enabled AND a.recipients<>''
+                ORDER BY o.id LIMIT 20
+                """,c);
+                var pending=new List<(long id,string store,string subject,string body,string recipients)>();
+                await using(var r=await cmd.ExecuteReaderAsync()){while(await r.ReadAsync())pending.Add((r.GetInt64(0),r.GetString(1),r.GetString(2),r.GetString(3),r.GetString(4)));}
+                foreach(var job in pending){
+                    try{
+                        await SendMail(ParseRecipients(job.recipients),job.subject,job.body);
+                        await using var done=new NpgsqlCommand("UPDATE alert_outbox SET sent_at=now() WHERE id=@id AND sent_at IS NULL",c);
+                        done.Parameters.AddWithValue("id",job.id);await done.ExecuteNonQueryAsync();
+                    }catch(Exception ex){
+                        app.Logger.LogWarning(ex,"Low-stock email delivery failed for store {Store}",job.store);
+                        await using var retry=new NpgsqlCommand("UPDATE alert_outbox SET attempts=attempts+1,next_attempt=now()+interval '5 minutes' * LEAST(attempts+1,12) WHERE id=@id",c);
+                        retry.Parameters.AddWithValue("id",job.id);await retry.ExecuteNonQueryAsync();
+                    }
+                }
+            }
+        }catch(Exception ex){app.Logger.LogError(ex,"Low-stock mail worker error");}
+        try{await Task.Delay(TimeSpan.FromSeconds(30),mailCts.Token);}catch(OperationCanceledException){break;}
+    }
+});
 await using (var c=await Connect())
 {
     await using var cmd=new NpgsqlCommand("""
