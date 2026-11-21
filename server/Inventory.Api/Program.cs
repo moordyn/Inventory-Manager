@@ -542,10 +542,9 @@ app.MapGet("/api/alerts/config",async (HttpContext ctx)=>{
     bool enabled=false;string recipients="";
     if(await r.ReadAsync()){enabled=r.GetBoolean(0);recipients=r.GetString(1);}
     await r.CloseAsync();
-    await using var googleCmd=new NpgsqlCommand("SELECT email FROM google_store_accounts WHERE store_id=@store",c);
-    googleCmd.Parameters.AddWithValue("store",who.Value.store);
-    var googleEmail=(string?)await googleCmd.ExecuteScalarAsync();
-    return Results.Ok(new{enabled,recipients,senderConfigured=MailConfigured()||(googleEmail is not null&&GoogleReady()),googleConfigured=GoogleReady(),googleEmail});
+    await using var googleCmd=new NpgsqlCommand("SELECT email FROM global_google_sender WHERE id=1",c);
+    var globalSenderEmail=(string?)await googleCmd.ExecuteScalarAsync();
+    return Results.Ok(new{enabled,recipients,senderConfigured=MailConfigured()||(globalSenderEmail is not null&&GoogleReady()),globalSenderEmail=GoogleReady()?globalSenderEmail:null,senderType=globalSenderEmail is not null&&GoogleReady()?"google":MailConfigured()?"smtp":"none"});
 });
 app.MapPut("/api/alerts/config",async (HttpContext ctx,AlertSettingsRequest req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
@@ -561,24 +560,26 @@ app.MapPut("/api/alerts/config",async (HttpContext ctx,AlertSettingsRequest req)
 app.MapPost("/api/alerts/test",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
-    if(!MailConfigured()&&!GoogleReady())return Results.BadRequest("No email sender configured.");
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT s.name,COALESCE(a.recipients,''),g.email FROM stores s LEFT JOIN store_alert_settings a ON a.store_id=s.id LEFT JOIN google_store_accounts g ON g.store_id=s.id WHERE s.id=@store",c);
+    await using var cmd=new NpgsqlCommand("SELECT s.name,COALESCE(a.recipients,'') FROM stores s LEFT JOIN store_alert_settings a ON a.store_id=s.id WHERE s.id=@store",c);
     cmd.Parameters.AddWithValue("store",who.Value.store);
-    await using var r=await cmd.ExecuteReaderAsync();
-    if(!await r.ReadAsync())return Results.NotFound();
-    var name=r.GetString(0);var recipients=ParseRecipients(r.GetString(1));
-    if(recipients.Length==0)return Results.BadRequest("Save at least one recipient first.");
-    var hasGoogle=!r.IsDBNull(2);
-    if(!hasGoogle&&!MailConfigured())return Results.BadRequest("Connect Google for this store before sending a test email.");
+    string name;string[] recipients;
+    await using(var r=await cmd.ExecuteReaderAsync()){
+        if(!await r.ReadAsync())return Results.NotFound();
+        name=r.GetString(0);recipients=ParseRecipients(r.GetString(1));
+    }
+    if(recipients.Length==0)return Results.BadRequest("Save at least one recipient address for this store first.");
+    await using var google=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM global_google_sender WHERE id=1)",c);
+    var useGoogle=GoogleReady()&&(bool)(await google.ExecuteScalarAsync()??false);
+    if(!useGoogle&&!MailConfigured())return Results.BadRequest("The global administrator must connect a Gmail sender before test emails can be sent.");
     try{
         var subject="Inventory Manager test — "+name;
         var body="Test successful. Low-stock notifications for "+name+" will be sent to this address when enabled.";
-        if(hasGoogle){if(!GoogleReady())return Results.BadRequest("Google OAuth server credentials are incomplete.");await SendGmail(who.Value.store,recipients,subject,body);}
+        if(useGoogle)await SendGmail(recipients,subject,body);
         else await SendMail(recipients,subject,body);
         return Results.Ok(new{sent=true});
     }
-    catch(Exception ex){app.Logger.LogError(ex,"Email test failed for store {Store}",who.Value.store);return Results.Problem("Email could not be sent. Check the connected Google account or server email settings.",statusCode:502);}
+    catch(Exception ex){app.Logger.LogError(ex,"Global sender test email failed for store {Store}",who.Value.store);return Results.Problem("Email could not be sent. Check the global Google sender or server email settings.",statusCode:502);}
 });
 bool MailConfigured()=>!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SMTP_USER"))&&!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SMTP_APP_PASSWORD"));
 async Task SendMail(string[] recipients,string subject,string body){
@@ -756,6 +757,7 @@ await using (var c=await Connect())
     CREATE TABLE IF NOT EXISTS stores(id text PRIMARY KEY,name text NOT NULL,active boolean NOT NULL DEFAULT true);
     CREATE TABLE IF NOT EXISTS store_alert_settings(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,enabled boolean NOT NULL DEFAULT false,recipients text NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS google_store_accounts(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,email text NOT NULL,refresh_token text NOT NULL,connected_by text NOT NULL,connected_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE IF NOT EXISTS global_google_sender(id smallint PRIMARY KEY CHECK(id=1),email text NOT NULL,refresh_token text NOT NULL,connected_by text NOT NULL,connected_at timestamptz NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS google_oauth_config(
         id smallint PRIMARY KEY CHECK(id=1),
         client_id text NOT NULL,
@@ -827,17 +829,18 @@ _ = Task.Run(async ()=>{
             if(MailConfigured()||GoogleReady()){
                 await using var c=await Connect();
                 await using var cmd=new NpgsqlCommand("""
-                SELECT o.id,o.store_id,o.subject,o.body,a.recipients,(g.store_id IS NOT NULL)
-                FROM alert_outbox o JOIN store_alert_settings a ON a.store_id=o.store_id LEFT JOIN google_store_accounts g ON g.store_id=o.store_id
-                WHERE o.sent_at IS NULL AND o.next_attempt<=now() AND a.enabled AND a.recipients<>'' AND (g.store_id IS NOT NULL OR @smtp)
+                SELECT o.id,o.store_id,o.subject,o.body,a.recipients,(@googleReady AND EXISTS(SELECT 1 FROM global_google_sender WHERE id=1))
+                FROM alert_outbox o JOIN store_alert_settings a ON a.store_id=o.store_id
+                WHERE o.sent_at IS NULL AND o.next_attempt<=now() AND a.enabled AND a.recipients<>'' AND ((@googleReady AND EXISTS(SELECT 1 FROM global_google_sender WHERE id=1)) OR @smtp)
                 ORDER BY o.id LIMIT 20
                 """,c);
                 cmd.Parameters.AddWithValue("smtp",MailConfigured());
+                cmd.Parameters.AddWithValue("googleReady",GoogleReady());
                 var pending=new List<(long id,string store,string subject,string body,string recipients,bool google)>();
                 await using(var r=await cmd.ExecuteReaderAsync()){while(await r.ReadAsync())pending.Add((r.GetInt64(0),r.GetString(1),r.GetString(2),r.GetString(3),r.GetString(4),r.GetBoolean(5)));}
                 foreach(var job in pending){
                     try{
-                        if(job.google)await SendGmail(job.store,ParseRecipients(job.recipients),job.subject,job.body);else await SendMail(ParseRecipients(job.recipients),job.subject,job.body);
+                        if(job.google)await SendGmail(ParseRecipients(job.recipients),job.subject,job.body);else await SendMail(ParseRecipients(job.recipients),job.subject,job.body);
                         await using var done=new NpgsqlCommand("UPDATE alert_outbox SET sent_at=now() WHERE id=@id AND sent_at IS NULL",c);
                         done.Parameters.AddWithValue("id",job.id);await done.ExecuteNonQueryAsync();
                     }catch(Exception ex){
