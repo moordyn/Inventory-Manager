@@ -752,14 +752,14 @@ app.MapGet("/api/items/{id:guid}/history",async (HttpContext ctx,Guid id)=>{
         if(!(bool)(await exists.ExecuteScalarAsync()??false))return Results.NotFound();
     }
     await using var cmd=new NpgsqlCommand("""
-        SELECT m.id,m.delta,m.before_qty,m.after_qty,m.created_at,COALESCE(m.note,''),m.employee_id
+        SELECT m.id,m.delta,m.before_qty,m.after_qty,m.created_at,COALESCE(m.note,''),m.employee_id,m.note_revision,m.note_updated_at,m.note_updated_by
         FROM movements m WHERE m.item_id=@id AND m.store_id=@store
         ORDER BY m.id DESC LIMIT 200
         """,c);
     cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r=await cmd.ExecuteReaderAsync();
     var list=new List<object>();
-    while(await r.ReadAsync())list.Add(new{id=r.GetInt64(0),delta=r.GetInt32(1),before=r.GetInt32(2),after=r.GetInt32(3),time=r.GetDateTime(4),note=r.GetString(5),employeeId=r.GetString(6)});
+    while(await r.ReadAsync())list.Add(new{id=r.GetInt64(0),delta=r.GetInt32(1),before=r.GetInt32(2),after=r.GetInt32(3),time=r.GetDateTime(4),note=r.GetString(5),employeeId=r.GetString(6),noteRevision=r.GetInt32(7),noteUpdatedAt=r.IsDBNull(8)?(DateTime?)null:r.GetDateTime(8),noteUpdatedBy=r.IsDBNull(9)?null:r.GetString(9)});
     return Results.Ok(list);
 });
 app.MapGet("/api/admin/audit",async (HttpContext ctx)=>{
@@ -843,15 +843,101 @@ app.MapPost("/api/items/{id:guid}/movements", async (HttpContext ctx, Guid id, M
     await tx.CommitAsync();
     return Results.Ok(new { before,after });
 });
+// Checkout notes can be corrected after the stock movement, without changing quantity, time or employee.
+app.MapPut("/api/movements/{id:long}/note",async (HttpContext ctx,long id,CheckoutNoteUpdate req)=>{
+    var who=await Identity(ctx);
+    if(who is null)return Results.Unauthorized();
+    var note=req.Note?.Trim();
+    if(string.IsNullOrWhiteSpace(note)||note.Length>1000)
+        return Results.BadRequest("Checkout note must contain 1–1000 characters.");
+    if(req.ExpectedRevision<0)return Results.BadRequest("Invalid note revision.");
+    await using var c=await Connect();
+    await using var tx=await c.BeginTransactionAsync();
+    string? original;string employee;int revision;
+    await using(var select=new NpgsqlCommand("""
+        SELECT m.note,m.employee_id,m.note_revision
+        FROM movements m WHERE m.id=@id AND m.store_id=@store AND m.delta<0
+        FOR UPDATE
+        """,c,tx)){
+        select.Parameters.AddWithValue("id",id);
+        select.Parameters.AddWithValue("store",who.Value.store);
+        await using var reader=await select.ExecuteReaderAsync();
+        if(!await reader.ReadAsync())return Results.NotFound();
+        original=reader.IsDBNull(0)?null:reader.GetString(0);
+        employee=reader.GetString(1);
+        revision=reader.GetInt32(2);
+    }
+    if(employee!=who.Value.employee&&!who.Value.admin)return Results.Forbid();
+    if(req.ExpectedRevision!=revision)return Results.Conflict("This note was changed by someone else. Refresh the transaction before editing.");
+    if(string.Equals(original?.Trim(),note,StringComparison.Ordinal))
+        return Results.Ok(new{updated=false,note,noteRevision=revision});
+    await using(var update=new NpgsqlCommand("""
+        UPDATE movements SET note=@note,note_revision=note_revision+1,
+          note_updated_at=now(),note_updated_by=@editor
+        WHERE id=@id AND store_id=@store AND delta<0
+        """,c,tx)){
+        update.Parameters.AddWithValue("note",note);
+        update.Parameters.AddWithValue("editor",who.Value.employee);
+        update.Parameters.AddWithValue("id",id);
+        update.Parameters.AddWithValue("store",who.Value.store);
+        await update.ExecuteNonQueryAsync();
+    }
+    await using(var log=new NpgsqlCommand("""
+        INSERT INTO movement_note_edits(movement_id,store_id,previous_note,new_note,changed_by,revision)
+        VALUES(@id,@store,@previous,@note,@editor,@revision)
+        """,c,tx)){
+        log.Parameters.AddWithValue("id",id);
+        log.Parameters.AddWithValue("store",who.Value.store);
+        log.Parameters.Add("previous",NpgsqlTypes.NpgsqlDbType.Text).Value=(object?)original??DBNull.Value;
+        log.Parameters.AddWithValue("note",note);
+        log.Parameters.AddWithValue("editor",who.Value.employee);
+        log.Parameters.AddWithValue("revision",revision+1);
+        await log.ExecuteNonQueryAsync();
+    }
+    if(who.Value.admin)
+        await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,who.Value.store,
+            "movement.note_updated",id.ToString(),"Checkout note revised");
+    await tx.CommitAsync();
+    return Results.Ok(new{updated=true,note,noteRevision=revision+1,noteUpdatedBy=who.Value.employee});
+});
+app.MapGet("/api/movements/{id:long}/note-edits",async (HttpContext ctx,long id)=>{
+    var who=await Identity(ctx);
+    if(who is null)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using(var exists=new NpgsqlCommand(
+        "SELECT EXISTS(SELECT 1 FROM movements WHERE id=@id AND store_id=@store AND delta<0)",c)){
+        exists.Parameters.AddWithValue("id",id);
+        exists.Parameters.AddWithValue("store",who.Value.store);
+        if(!(bool)(await exists.ExecuteScalarAsync()??false))return Results.NotFound();
+    }
+    await using var cmd=new NpgsqlCommand("""
+        SELECT revision,previous_note,new_note,changed_by,changed_at
+        FROM movement_note_edits
+        WHERE movement_id=@id AND store_id=@store
+        ORDER BY id DESC LIMIT 100
+        """,c);
+    cmd.Parameters.AddWithValue("id",id);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
+    await using var reader=await cmd.ExecuteReaderAsync();
+    var history=new List<object>();
+    while(await reader.ReadAsync())history.Add(new{
+        revision=reader.GetInt32(0),
+        previousNote=reader.IsDBNull(1)?null:reader.GetString(1),
+        note=reader.GetString(2),
+        employeeId=reader.GetString(3),
+        time=reader.GetDateTime(4)
+    });
+    return Results.Ok(history);
+});
 app.MapGet("/api/movements", async (HttpContext ctx) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c = await Connect();
-    await using var cmd = new NpgsqlCommand("SELECT m.id,i.sku,i.name,m.delta,m.before_qty,m.after_qty,m.created_at,m.note,m.store_id,m.employee_id FROM movements m JOIN items i ON i.id=m.item_id WHERE m.store_id=@store ORDER BY m.id DESC LIMIT 200",c);
+    await using var cmd = new NpgsqlCommand("SELECT m.id,i.sku,i.name,m.delta,m.before_qty,m.after_qty,m.created_at,m.note,m.store_id,m.employee_id,m.note_revision,m.note_updated_at,m.note_updated_by FROM movements m JOIN items i ON i.id=m.item_id WHERE m.store_id=@store ORDER BY m.id DESC LIMIT 200",c);
     cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r=await cmd.ExecuteReaderAsync();
     var list=new List<object>();
-    while(await r.ReadAsync()) list.Add(new{id=r.GetInt64(0),sku=r.GetString(1),name=r.GetString(2),delta=r.GetInt32(3),before=r.GetInt32(4),after=r.GetInt32(5),time=r.GetDateTime(6),note=r.IsDBNull(7)?null:r.GetString(7),storeId=r.GetString(8),employeeId=r.GetString(9)});
+    while(await r.ReadAsync()) list.Add(new{id=r.GetInt64(0),sku=r.GetString(1),name=r.GetString(2),delta=r.GetInt32(3),before=r.GetInt32(4),after=r.GetInt32(5),time=r.GetDateTime(6),note=r.IsDBNull(7)?null:r.GetString(7),storeId=r.GetString(8),employeeId=r.GetString(9),noteRevision=r.GetInt32(10),noteUpdatedAt=r.IsDBNull(11)?(DateTime?)null:r.GetDateTime(11),noteUpdatedBy=r.IsDBNull(12)?null:r.GetString(12)});
     return Results.Ok(list);
 });
 
@@ -979,6 +1065,20 @@ await using (var c=await Connect())
     DROP INDEX IF EXISTS items_barcode_idx;
     DROP INDEX IF EXISTS items_store_barcode_idx;
     CREATE UNIQUE INDEX IF NOT EXISTS items_store_barcode_idx ON items(store_id,barcode) WHERE barcode IS NOT NULL AND deleted_at IS NULL;
+    ALTER TABLE movements ADD COLUMN IF NOT EXISTS note_revision integer NOT NULL DEFAULT 0;
+    ALTER TABLE movements ADD COLUMN IF NOT EXISTS note_updated_at timestamptz;
+    ALTER TABLE movements ADD COLUMN IF NOT EXISTS note_updated_by text;
+    CREATE TABLE IF NOT EXISTS movement_note_edits(
+        id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        movement_id bigint NOT NULL REFERENCES movements(id),
+        store_id text NOT NULL,
+        previous_note text,
+        new_note text NOT NULL,
+        changed_by text NOT NULL,
+        changed_at timestamptz NOT NULL DEFAULT now(),
+        revision integer NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS movement_note_edits_history_idx ON movement_note_edits(store_id,movement_id,id DESC);
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS idempotency_key uuid;
     CREATE UNIQUE INDEX IF NOT EXISTS movements_idempotency_key_idx ON movements(idempotency_key) WHERE idempotency_key IS NOT NULL;
     CREATE INDEX IF NOT EXISTS movements_store_item_recent_idx ON movements(store_id,item_id,id DESC);
@@ -1038,6 +1138,7 @@ record Setup(string? SetupToken,string? Pin,string? ConfirmPin);
 record Login(string? Pin,string? EmployeeId=null);
 record NewItem(string Sku,string Name,int Quantity,string? Barcode="",string? Category="",string? Description="",int MinStock=0,decimal? UnitCost=null);
 record MovementRequest(int Delta,string? Note,Guid IdempotencyKey);
+record CheckoutNoteUpdate(string? Note,int ExpectedRevision);
 record EditItem(string Sku,string Name,string? Barcode,string? Category,string? Description,int MinStock,decimal? UnitCost);
 
 record EmployeeLogin(string? EmployeeId);
