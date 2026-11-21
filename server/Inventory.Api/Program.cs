@@ -355,7 +355,7 @@ app.MapGet("/api/items", async (HttpContext ctx) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c = await Connect();
-    await using var cmd = new NpgsqlCommand("SELECT id,sku,name,quantity,COALESCE(category,''),COALESCE(barcode,''),min_stock,unit_cost,COALESCE(description,'') FROM items WHERE store_id=@store ORDER BY name LIMIT 1000", c);
+    await using var cmd = new NpgsqlCommand("SELECT id,sku,name,quantity,COALESCE(category,''),COALESCE(barcode,''),min_stock,unit_cost,COALESCE(description,'') FROM items WHERE store_id=@store AND deleted_at IS NULL ORDER BY name LIMIT 1000", c);
     cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r = await cmd.ExecuteReaderAsync();
     var list = new List<object>();
@@ -396,14 +396,14 @@ app.MapPost("/api/items/{id:guid}/movements", async (HttpContext ctx, Guid id, M
         var found = await duplicate.ExecuteScalarAsync();
         if (found is not null) return Results.Ok(new { after=(int)found,duplicate=true });
     }
-    await using var select = new NpgsqlCommand("SELECT quantity FROM items WHERE id=@id AND store_id=@store FOR UPDATE",c,tx);
+    await using var select = new NpgsqlCommand("SELECT quantity FROM items WHERE id=@id AND store_id=@store AND deleted_at IS NULL FOR UPDATE",c,tx);
     select.Parameters.AddWithValue("id",id);select.Parameters.AddWithValue("store",who.Value.store);
     var current=await select.ExecuteScalarAsync();
     if (current is null) return Results.NotFound();
     var before=(int)current;
     var after=(long)before+req.Delta;
     if (after<0 || after>int.MaxValue) return Results.BadRequest("Insufficient stock or quantity overflow");
-    await using (var update = new NpgsqlCommand("UPDATE items SET quantity=@qty WHERE id=@id AND store_id=@store",c,tx))
+    await using (var update = new NpgsqlCommand("UPDATE items SET quantity=@qty WHERE id=@id AND store_id=@store AND deleted_at IS NULL",c,tx))
     {
         update.Parameters.AddWithValue("qty",(int)after);update.Parameters.AddWithValue("id",id);update.Parameters.AddWithValue("store",who.Value.store);await update.ExecuteNonQueryAsync();
     }
@@ -433,7 +433,7 @@ app.MapGet("/api/summary", async (HttpContext ctx) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT count(*),COALESCE(sum(quantity),0),count(*) FILTER(WHERE quantity<=min_stock),COALESCE(sum(quantity*unit_cost),0) FROM items WHERE store_id=@store",c);
+    await using var cmd=new NpgsqlCommand("SELECT count(*),COALESCE(sum(quantity),0),count(*) FILTER(WHERE quantity<=min_stock),COALESCE(sum(quantity*unit_cost),0) FROM items WHERE store_id=@store AND deleted_at IS NULL",c);
     cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r=await cmd.ExecuteReaderAsync();await r.ReadAsync();
     return Results.Ok(new{products=r.GetInt64(0),units=r.GetInt64(1),lowStock=r.GetInt64(2),value=r.GetDecimal(3)});
@@ -442,7 +442,7 @@ app.MapGet("/api/items/lookup/{code}", async (HttpContext ctx, string code) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT id,sku,name,quantity FROM items WHERE store_id=@store AND (sku=@code OR barcode=@code) LIMIT 1",c);
+    await using var cmd=new NpgsqlCommand("SELECT id,sku,name,quantity FROM items WHERE store_id=@store AND deleted_at IS NULL AND (sku=@code OR barcode=@code) LIMIT 1",c);
     cmd.Parameters.AddWithValue("code",code);cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r=await cmd.ExecuteReaderAsync();
     return await r.ReadAsync()?Results.Ok(new{id=r.GetGuid(0),sku=r.GetString(1),name=r.GetString(2),quantity=r.GetInt32(3)}):Results.NotFound();
@@ -452,7 +452,7 @@ app.MapPut("/api/items/{id:guid}", async (HttpContext ctx, Guid id, EditItem req
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(string.IsNullOrWhiteSpace(req.Name)||string.IsNullOrWhiteSpace(req.Sku)||req.MinStock<0||req.UnitCost<0)return Results.BadRequest("Invalid item details");
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("UPDATE items SET sku=@sku,name=@name,barcode=NULLIF(@barcode,''),category=@category,description=@description,min_stock=@min,unit_cost=@cost,updated_at=now() WHERE id=@id AND store_id=@store",c);
+    await using var cmd=new NpgsqlCommand("UPDATE items SET sku=@sku,name=@name,barcode=NULLIF(@barcode,''),category=@category,description=@description,min_stock=@min,unit_cost=@cost,updated_at=now() WHERE id=@id AND store_id=@store AND deleted_at IS NULL",c);
     cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("sku",req.Sku.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
     cmd.Parameters.AddWithValue("barcode",(req.Barcode??"").Trim());cmd.Parameters.AddWithValue("category",(req.Category??"").Trim());cmd.Parameters.AddWithValue("description",(req.Description??"").Trim());
     cmd.Parameters.AddWithValue("min",req.MinStock);cmd.Parameters.AddWithValue("cost",(object?)req.UnitCost??DBNull.Value);
@@ -464,6 +464,29 @@ app.MapPut("/api/items/{id:guid}", async (HttpContext ctx, Guid id, EditItem req
     return Results.Ok(new{updated=true});
 });
 
+app.MapPost("/api/items/{id:guid}/delete",async (HttpContext ctx,Guid id,DeleteItemRequest req)=>{
+    var who=await Identity(ctx);
+    if(who is null)return Results.Unauthorized();
+    // Product removal is restricted to a store administrator or global administrator.
+    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    await using var c=await Connect();
+    await using var tx=await c.BeginTransactionAsync();
+    await using var find=new NpgsqlCommand("SELECT name FROM items WHERE id=@id AND store_id=@store AND deleted_at IS NULL FOR UPDATE",c,tx);
+    find.Parameters.AddWithValue("id",id);find.Parameters.AddWithValue("store",who.Value.store);
+    var name=(string?)await find.ExecuteScalarAsync();
+    if(name is null)return Results.NotFound();
+    var required=name.ToUpperInvariant();
+    if(!string.Equals(req.Confirmation,required,StringComparison.Ordinal))
+        return Results.BadRequest("Confirmation must match the displayed uppercase product name exactly, including case and spaces.");
+    await using var update=new NpgsqlCommand("UPDATE items SET deleted_at=now(),deleted_by=@employee,updated_at=now() WHERE id=@id AND store_id=@store AND deleted_at IS NULL",c,tx);
+    update.Parameters.AddWithValue("id",id);update.Parameters.AddWithValue("store",who.Value.store);update.Parameters.AddWithValue("employee",who.Value.employee);
+    await update.ExecuteNonQueryAsync();
+    await using var pending=new NpgsqlCommand("DELETE FROM alert_outbox WHERE item_id=@id AND sent_at IS NULL",c,tx);
+    pending.Parameters.AddWithValue("id",id);await pending.ExecuteNonQueryAsync();
+    await tx.CommitAsync();
+    app.Logger.LogInformation("Product {ProductId} archived by employee {Employee} in store {Store}",id,who.Value.employee,who.Value.store);
+    return Results.Ok(new{deleted=true});
+});
 // Delivery loop runs on the API host; inventory operations never depend on Gmail availability.
 var mailCts=new CancellationTokenSource();
 app.Lifetime.ApplicationStopping.Register(()=>mailCts.Cancel());
@@ -525,15 +548,19 @@ await using (var c=await Connect())
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT' REFERENCES stores(id);
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS employee_id text NOT NULL DEFAULT 'LEGACY';
     ALTER TABLE items DROP CONSTRAINT IF EXISTS items_sku_key;
-    CREATE UNIQUE INDEX IF NOT EXISTS items_store_sku_idx ON items(store_id,sku);
+    DROP INDEX IF EXISTS items_store_sku_idx;
+    CREATE UNIQUE INDEX IF NOT EXISTS items_store_sku_idx ON items(store_id,sku) WHERE deleted_at IS NULL;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT '';
     ALTER TABLE items ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '';
     ALTER TABLE items ADD COLUMN IF NOT EXISTS barcode text;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS min_stock integer NOT NULL DEFAULT 0;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS unit_cost numeric(12,2);
     ALTER TABLE items ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS deleted_by text;
     DROP INDEX IF EXISTS items_barcode_idx;
-    CREATE UNIQUE INDEX IF NOT EXISTS items_store_barcode_idx ON items(store_id,barcode) WHERE barcode IS NOT NULL;
+    DROP INDEX IF EXISTS items_store_barcode_idx;
+    CREATE UNIQUE INDEX IF NOT EXISTS items_store_barcode_idx ON items(store_id,barcode) WHERE barcode IS NOT NULL AND deleted_at IS NULL;
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS idempotency_key uuid;
     CREATE UNIQUE INDEX IF NOT EXISTS movements_idempotency_key_idx ON movements(idempotency_key) WHERE idempotency_key IS NOT NULL;
     """,c);
@@ -555,3 +582,5 @@ record StoreNameRequest(string? Name);
 record AlertSettingsRequest(bool Enabled,string? Recipients);
 
 record EmployeePermissions(bool GlobalAdmin,string[]? StoreAdminIds);
+
+record DeleteItemRequest(string? Confirmation);
