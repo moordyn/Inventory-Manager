@@ -162,12 +162,18 @@ function authScreen(which){$('auth').classList.remove('hidden');$('app').classLi
 async function enter(){try{identity=await api('auth/me');$('signedInEmployee').textContent=identity.employeeName||identity.employeeId;$('signedInEmployeeId').textContent='Employee ID: '+identity.employeeId;$('mobileEmployeeName').textContent=identity.employeeName||identity.employeeId;allowedStores=identity.isGlobalAdmin?await api('admin/stores'):await api('auth/stores');$('adminNav').classList.toggle('hidden',!identity.isAdmin);$('mobileAdminNav').classList.toggle('hidden',!identity.isAdmin);$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;renderStorePicker();updateLocationBrand();navigate('overview');startIdleTimer();await load();
  const googleReturn=new URLSearchParams(location.search).get('google');
  if(googleReturn){
-   history.replaceState(null,'',location.pathname+location.hash);
+   window.history.replaceState(null,'',location.pathname+location.hash);
    if(identity?.isAdmin)navigate('administration');
    const googleMessages={connected:'Google account connected to this store.',cancelled:'Google sign-in was cancelled.',expired:'Google sign-in expired. Try connecting again.',unauthorized:'You no longer have permission to connect this store.',no_refresh_token:'Google did not grant offline email access. Reconnect and approve access.',unverified:'Google account email could not be verified.',not_configured:'Google integration is not configured on the server.',failed:'Google sign-in could not be completed. Please try again.'};
    toast(googleMessages[googleReturn]||'Google sign-in finished.',googleReturn!=='connected');
  }
- }catch(e){logout(false)}}
+ }catch(e){
+   console.error('Unable to finish opening the dashboard:',e);
+   // Only authentication failures should clear a valid session. A UI/rendering
+   // problem must not silently invalidate an otherwise successful login.
+   if(!identity){logout(false);$('authMsg').textContent='Could not verify your session. Please sign in again.'}
+   else{toast('Dashboard error: '+(e?.message||String(e)),true)}
+ }}
 const IDLE_LIMIT_MS=30000;
 let lastUserActivity=Date.now(),idleTimer=null;
 function resetIdleTimer(){if(!token||$('app').classList.contains('hidden'))return;lastUserActivity=Date.now();}
