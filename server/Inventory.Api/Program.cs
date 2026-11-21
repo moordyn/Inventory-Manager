@@ -139,9 +139,10 @@ app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>
 
 app.MapGet("/api/items", async (HttpContext ctx) =>
 {
-    if (!await Authed(ctx)) return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c = await Connect();
-    await using var cmd = new NpgsqlCommand("SELECT id,sku,name,quantity,COALESCE(category,''),COALESCE(barcode,''),min_stock,unit_cost,COALESCE(description,'') FROM items ORDER BY name LIMIT 1000", c);
+    await using var cmd = new NpgsqlCommand("SELECT id,sku,name,quantity,COALESCE(category,''),COALESCE(barcode,''),min_stock,unit_cost,COALESCE(description,'') FROM items WHERE store_id=@store ORDER BY name LIMIT 1000", c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r = await cmd.ExecuteReaderAsync();
     var list = new List<object>();
     while (await r.ReadAsync()) list.Add(new { id=r.GetGuid(0),sku=r.GetString(1),name=r.GetString(2),quantity=r.GetInt32(3),category=r.GetString(4),barcode=r.GetString(5),minStock=r.GetInt32(6),unitCost=r.IsDBNull(7)?(decimal?)null:r.GetDecimal(7),description=r.GetString(8) });
@@ -149,51 +150,52 @@ app.MapGet("/api/items", async (HttpContext ctx) =>
 });
 app.MapPost("/api/items", async (HttpContext ctx, NewItem req) =>
 {
-    if (!await Authed(ctx)) return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(req.Sku) || string.IsNullOrWhiteSpace(req.Name) || req.Quantity < 0 || req.MinStock < 0 || req.UnitCost < 0) return Results.BadRequest("Invalid item");
     await using var c = await Connect();
     await using var tx = await c.BeginTransactionAsync();
     var id = Guid.NewGuid();
-    await using (var cmd = new NpgsqlCommand("INSERT INTO items(id,sku,name,quantity,barcode,category,description,min_stock,unit_cost) VALUES(@id,@sku,@name,@qty,NULLIF(@barcode,''),@category,@description,@min,@cost)",c,tx))
+    await using (var cmd = new NpgsqlCommand("INSERT INTO items(id,sku,name,quantity,barcode,category,description,min_stock,unit_cost,store_id) VALUES(@id,@sku,@name,@qty,NULLIF(@barcode,''),@category,@description,@min,@cost,@store)",c,tx))
     {
-        cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("sku",req.Sku.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());cmd.Parameters.AddWithValue("qty",req.Quantity);cmd.Parameters.AddWithValue("barcode",(req.Barcode??"").Trim());cmd.Parameters.AddWithValue("category",req.Category??"");cmd.Parameters.AddWithValue("description",req.Description??"");cmd.Parameters.AddWithValue("min",req.MinStock);cmd.Parameters.AddWithValue("cost",(object?)req.UnitCost??DBNull.Value);
+        cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("sku",req.Sku.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());cmd.Parameters.AddWithValue("qty",req.Quantity);cmd.Parameters.AddWithValue("barcode",(req.Barcode??"").Trim());cmd.Parameters.AddWithValue("category",req.Category??"");cmd.Parameters.AddWithValue("description",req.Description??"");cmd.Parameters.AddWithValue("min",req.MinStock);cmd.Parameters.AddWithValue("cost",(object?)req.UnitCost??DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
     }
     if (req.Quantity > 0)
     {
-        await using var cmd = new NpgsqlCommand("INSERT INTO movements(item_id,delta,before_qty,after_qty,note) VALUES(@id,@delta,0,@delta,'Initial stock')",c,tx);
-        cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("delta",req.Quantity);await cmd.ExecuteNonQueryAsync();
+        await using var cmd = new NpgsqlCommand("INSERT INTO movements(item_id,delta,before_qty,after_qty,note,store_id,employee_id) VALUES(@id,@delta,0,@delta,'Initial stock',@store,@emp)",c,tx);
+        cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("delta",req.Quantity);cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("emp",who.Value.employee);await cmd.ExecuteNonQueryAsync();
     }
     await tx.CommitAsync();
     return Results.Created($"/api/items/{id}",new{id});
 });
 app.MapPost("/api/items/{id:guid}/movements", async (HttpContext ctx, Guid id, MovementRequest req) =>
 {
-    if (!await Authed(ctx)) return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(req.Delta<0 && string.IsNullOrWhiteSpace(req.Note))return Results.BadRequest("Checkout reason is required.");
     if (req.Delta==0 || req.IdempotencyKey==Guid.Empty) return Results.BadRequest("Nonzero delta and idempotency key required");
     await using var c = await Connect();
     await using var tx = await c.BeginTransactionAsync();
-    await using (var duplicate = new NpgsqlCommand("SELECT after_qty FROM movements WHERE idempotency_key=@key",c,tx))
+    await using (var duplicate = new NpgsqlCommand("SELECT after_qty FROM movements WHERE idempotency_key=@key AND store_id=@store",c,tx))
     {
-        duplicate.Parameters.AddWithValue("key",req.IdempotencyKey);
+        duplicate.Parameters.AddWithValue("key",req.IdempotencyKey);duplicate.Parameters.AddWithValue("store",who.Value.store);
         var found = await duplicate.ExecuteScalarAsync();
         if (found is not null) return Results.Ok(new { after=(int)found,duplicate=true });
     }
-    await using var select = new NpgsqlCommand("SELECT quantity FROM items WHERE id=@id FOR UPDATE",c,tx);
-    select.Parameters.AddWithValue("id",id);
+    await using var select = new NpgsqlCommand("SELECT quantity FROM items WHERE id=@id AND store_id=@store FOR UPDATE",c,tx);
+    select.Parameters.AddWithValue("id",id);select.Parameters.AddWithValue("store",who.Value.store);
     var current=await select.ExecuteScalarAsync();
     if (current is null) return Results.NotFound();
     var before=(int)current;
     var after=(long)before+req.Delta;
     if (after<0 || after>int.MaxValue) return Results.BadRequest("Insufficient stock or quantity overflow");
-    await using (var update = new NpgsqlCommand("UPDATE items SET quantity=@qty WHERE id=@id",c,tx))
+    await using (var update = new NpgsqlCommand("UPDATE items SET quantity=@qty WHERE id=@id AND store_id=@store",c,tx))
     {
-        update.Parameters.AddWithValue("qty",(int)after);update.Parameters.AddWithValue("id",id);await update.ExecuteNonQueryAsync();
+        update.Parameters.AddWithValue("qty",(int)after);update.Parameters.AddWithValue("id",id);update.Parameters.AddWithValue("store",who.Value.store);await update.ExecuteNonQueryAsync();
     }
-    await using (var insert = new NpgsqlCommand("INSERT INTO movements(item_id,delta,before_qty,after_qty,note,idempotency_key) VALUES(@id,@delta,@before,@after,@note,@key) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING",c,tx))
+    await using (var insert = new NpgsqlCommand("INSERT INTO movements(item_id,delta,before_qty,after_qty,note,idempotency_key,store_id,employee_id) VALUES(@id,@delta,@before,@after,@note,@key,@store,@emp) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING",c,tx))
     {
         insert.Parameters.AddWithValue("id",id);insert.Parameters.AddWithValue("delta",req.Delta);insert.Parameters.AddWithValue("before",before);insert.Parameters.AddWithValue("after",(int)after);
-        insert.Parameters.AddWithValue("note",(object?)req.Note??DBNull.Value);insert.Parameters.AddWithValue("key",req.IdempotencyKey);
+        insert.Parameters.AddWithValue("note",(object?)req.Note??DBNull.Value);insert.Parameters.AddWithValue("key",req.IdempotencyKey);insert.Parameters.AddWithValue("store",who.Value.store);insert.Parameters.AddWithValue("emp",who.Value.employee);
         if (await insert.ExecuteNonQueryAsync()==0) { await tx.RollbackAsync(); return Results.Conflict("Retry request after concurrent transaction"); }
     }
     await tx.CommitAsync();
@@ -201,7 +203,7 @@ app.MapPost("/api/items/{id:guid}/movements", async (HttpContext ctx, Guid id, M
 });
 app.MapGet("/api/movements", async (HttpContext ctx) =>
 {
-    if (!await Authed(ctx)) return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c = await Connect();
     await using var cmd = new NpgsqlCommand("SELECT m.id,i.sku,i.name,m.delta,m.before_qty,m.after_qty,m.created_at,m.note FROM movements m JOIN items i ON i.id=m.item_id ORDER BY m.id DESC LIMIT 200",c);
     await using var r=await cmd.ExecuteReaderAsync();
@@ -212,7 +214,7 @@ app.MapGet("/api/movements", async (HttpContext ctx) =>
 
 app.MapGet("/api/summary", async (HttpContext ctx) =>
 {
-    if (!await Authed(ctx)) return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT count(*),COALESCE(sum(quantity),0),count(*) FILTER(WHERE quantity<=min_stock),COALESCE(sum(quantity*unit_cost),0) FROM items",c);
     await using var r=await cmd.ExecuteReaderAsync();await r.ReadAsync();
@@ -220,7 +222,7 @@ app.MapGet("/api/summary", async (HttpContext ctx) =>
 });
 app.MapGet("/api/items/lookup/{code}", async (HttpContext ctx, string code) =>
 {
-    if (!await Authed(ctx)) return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT id,sku,name,quantity FROM items WHERE sku=@code OR barcode=@code LIMIT 1",c);
     cmd.Parameters.AddWithValue("code",code);
@@ -229,7 +231,7 @@ app.MapGet("/api/items/lookup/{code}", async (HttpContext ctx, string code) =>
 });
 app.MapPut("/api/items/{id:guid}", async (HttpContext ctx, Guid id, EditItem req) =>
 {
-    if (!await Authed(ctx)) return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(string.IsNullOrWhiteSpace(req.Name)||string.IsNullOrWhiteSpace(req.Sku)||req.MinStock<0||req.UnitCost<0)return Results.BadRequest("Invalid item details");
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("UPDATE items SET sku=@sku,name=@name,barcode=NULLIF(@barcode,''),category=@category,description=@description,min_stock=@min,unit_cost=@cost,updated_at=now() WHERE id=@id",c);
