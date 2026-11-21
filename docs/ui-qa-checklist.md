@@ -40,7 +40,7 @@ These tests are required before calling a deployment production-ready. Automated
 
 ## Signed-in ambient animation
 
-- [ ] A subtle, slow animation is visible **behind** main-app content while signed in, without blocking the sidebar, buttons, forms, tables, camera UI or modal dialogs.
+- [ ] A clearly visible but slow animation is visible across the background and subtly behind translucent cards/sidebar, without reducing the readability of tables, forms, sidebar, camera UI or modal dialogs.
 - [ ] Pointer and touch movements do **not** change the signed-in animation; only the login-screen aurora is interactive.
 - [ ] Each personal theme changes the ambient colors immediately, including a restrained light-mode version for Glacier Light.
 - [ ] Animation starts after sign-in, stops on logout and while the tab is hidden, and resumes on return.
