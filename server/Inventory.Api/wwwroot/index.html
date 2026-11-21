@@ -762,7 +762,7 @@ document.addEventListener('click',async e=>{
     if(String(row.id)!==String(id))continue;
     row.note=updated.note;
     row.noteRevision=updated.noteRevision;
-    if(updated.updated){row.noteUpdatedBy=updated.noteUpdatedBy||identity?.employeeId;row.noteUpdatedAt=new Date().toISOString()}
+    if(updated.updated){row.noteUpdatedBy=updated.noteUpdatedBy||identity?.employeeId;row.noteUpdatedAt=updated.noteUpdatedAt||new Date().toISOString()}
    }
    rerenderCheckoutNotes();
    toast('Checkout note updated');
