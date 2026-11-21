@@ -42,7 +42,7 @@ A root domain (e.g. `https://example.com`) is equally valid: set `PUBLIC_ORIGIN=
 2. [Record installation information](#2-record-installation-information)
 3. [Prerequisites and Ubuntu/Proxmox preparation](#3-prerequisites-and-ubuntuproxmox-preparation)
 4. [Install Inventory Manager from scratch](#4-install-inventory-manager-from-scratch)
-5. [Initial admin PIN and store onboarding](#5-initial-admin-pin-and-store-onboarding)
+5. [Initial administrator setup, employee accounts, and onboarding](#5-initial-administrator-setup-employee-accounts-and-onboarding)
 6. [Choose DNS and configure optional Cloudflare/OPNsense DDNS](#6-choose-dns-and-configure-optional-cloudflareopnsense-ddns)
 7. [Router rules and an HTTPS reverse proxy](#7-router-rules-and-an-https-reverse-proxy)
 8. [HTTPS, certificates and optional Cloudflare proxy](#8-https-certificates-and-optional-cloudflare-proxy)
@@ -306,69 +306,87 @@ The current Compose file maps host **18424** to API container **8080**, with Pos
 
 ---
 
-## 5. Initial admin PIN and store onboarding
+## 5. Initial administrator setup, employee accounts, and onboarding
 
-### 5.1 First-run PIN
+### 5.1 First-run OWNER setup (no shared PIN)
 
-On a **brand-new database**, visit the local LAN URL or, once network and TLS are working, the public HTTPS URL. The first-time screen asks for:
+On a **fresh install**, visit the app and complete **Set up your administrator account**. The installer creates a unique, secret `SETUP_TOKEN` in `/opt/inventory-manager/.env` and prints it once. Enter:
+1. That **installation token**.
+2. The **OWNER** administrator's own email address **twice**.
+3. An individual password **twice**. Both must match; password policy: **8–128 characters with at least one uppercase letter, lowercase letter, digit, and symbol**.
 
-1. **Installation token:** a generated secret printed by <code>deploy/install.sh</code>, saved in <code>.env</code>.
-2. **New PIN:** a six-digit numeric administrator PIN.
-3. **Confirm PIN:** repeat the six digits.
+The token is the required proof of initial setup authority for the **OWNER** global administrator. It is **not an employee password** and cannot be used to overwrite the OWNER account after setup. The app stores only a salted PBKDF2-HMAC-SHA256 password hash (600,000 iterations), not plaintext passwords.
 
-The PIN is stored as a salted PBKDF2 hash. **The setup token is not an administrator password** and cannot be used to replace an existing PIN through the setup screen. Keep both credentials private.
+A new installation cannot verify the administrator email immediately because the **global sending Gmail account is not connected yet**. The OWNER can provisionally sign in using the new password and installation-token authorization. After connecting the global Gmail sender in §9–§10, go to **Settings → Account security → Email verification link**, confirm the emailed link and verify the mailbox. **Password reset links are unavailable for that OWNER mailbox until verification has been completed.**
 
-If the original terminal output is no longer available, a root administrator can inspect the local protected <code>.env</code> without disclosing it to others:
+The initial seeded store is `DEFAULT` (“Original Store”); the initial global admin employee ID is `OWNER` (“Original Administrator”).
+
+If the setup terminal output is unavailable, an authorized root administrator can read **only** the setup token from the private file:
 
 ~~~bash
 cd /opt/inventory-manager
 sudo grep '^SETUP_TOKEN=' .env
 ~~~
 
-Do **not** paste that output into logs, email, tickets or support chats. If <code>/api/auth/status</code> already shows initialized, do **not** expect the first-run screen or rerun the setup process.
+Treat the result as secret. Never paste it into logs, chat, email, tickets, or screenshots.
+
+**Migration from an older shared-PIN deployment:** Upgrading to v1.1.0 invalidates existing sessions and disables the old PIN login endpoint. Existing stores/employees/inventory are preserved. The OWNER must enroll with the original `SETUP_TOKEN` and a new email/password before regaining admin access. Preserve your `.env` (including `SETUP_TOKEN` and `GOOGLE_TOKEN_KEY`) during upgrades. Schedule a maintenance window and backup first.
 
 ### 5.2 Log in as global administrator
 
-Use **Administrator access** on the sign-in screen with:
-
-- Administrator employee ID: <code>OWNER</code> on a fresh install.
-- Administrator PIN: the six-digit PIN enrolled above.
-
-The initial database creates store <code>DEFAULT</code> (“Original Store”) and the global administrator <code>OWNER</code> (“Original Administrator”). The PIN-protected global administrator is distinct from a basic employee ID login.
+Open **Employee sign in**, enter **OWNER** and the administrator's individual password. There is no separate shared-PIN admin login. Global-admin permissions remain associated with the OWNER account; later administrators can be assigned roles in Administration as before.
 
 ### 5.3 Configure stores
 
-Open **Administration**. Set a recognizable name for the default store and add additional stores as needed.
+In **Administration**, assign a readable name to the default location and add further stores as needed:
+- Store IDs are unique strings of 2–24 permitted letters, numbers, hyphens or underscores.
+- Global admins manage stores; store admins can manage permitted site-specific operations.
+- Renaming a store ID changes multiple linked records. Take a backup and test before modifying an active store.
 
-- Each store has a unique **Store ID** consisting of 2–24 letters, digits, hyphens or underscores.
-- Each store also has a human-readable name. Record the ID-to-location mapping for staff and backups.
-- Creating/managing locations is a **global administrator** activity.
-- Be careful when renaming store IDs after the app is in use: it touches relationships across inventory, sessions and audit history. Take a backup first and perform a smoke test afterward.
+### 5.4 Add employees (admin only enters their ID, name and store)
 
-### 5.4 Configure employees and access
+In **Administration → Team & permissions → Add employee**, the administrator enters only:
+- The employee's **unique Employee ID** (2–24 letters/numbers/hyphens/underscores).
+- The employee name.
+- Their primary store; optionally grant other stores and roles.
 
-In **Administration**, create employees with a unique employee ID and name, assign their primary store, and grant additional store access where appropriate.
+**The administrator does not have to know or enter the employee's personal email or password.**
 
-- Employee IDs must be **unique across all stores** and 2–24 allowed characters (letters/digits/hyphens/underscores).
-- Standard employees use **Employee login** with their employee ID.
-- Store administrators can manage store-specific administrative features if granted that role.
-- The global administrator controls company-wide Gmail sender settings and global-level store/role management.
-- Remove access when an employee leaves; confirm their sessions and permissions are no longer valid.
-- An employee's **primary** store access is not removable from the access-grants interface.
-- Staff switch their active store using the store selector when they have permission for more than one store.
+### 5.5 First-time employee activation
 
-**Security reminder:** These store permissions are not a substitute for strong authentication; employee-ID-only login is weak, especially if the user is also a store admin. Verify your access policy before a public launch.
+Once the company Gmail or SMTP sender is configured:
+1. Employee opens **Employee sign in**, enters the Employee ID and attempts to sign in, or selects **First-time setup**.
+2. The app sends an unactivated account to **Activate employee account**.
+3. Employee enters their Employee ID, email and **confirm email** (must match), password and **confirm password** (must match and meet the full policy).
+4. The backend saves a pending hashed-password claim and sends a **single-use email verification link** to that submitted mailbox. The link expires in **24 hours**.
+5. Employee opens the email and selects **Verify and activate**. Only then is their email verified, account activated and password accepted for normal sign-in.
+6. Subsequent logins require **Employee ID + password**. Checkout records still preserve that ID as the employee attribution.
 
-### 5.5 First inventory entries
+If sending email fails, the enrollment is not committed, so the employee can retry. An unexpired pending activation for an Employee ID cannot silently be replaced with a different email; contact an administrator if the ID appears claimed. Re-requests to the same email are throttled. Password reset cannot be used before an email is verified.
 
-For each store, create a representative product:
-- SKU and product name (required).
-- Optional barcode, category and description.
-- Optional unit cost and minimum-stock threshold.
-- Starting quantity.
+### 5.6 Forgot password / recovery links
 
-Scan the item with a barcode gun or the device camera; check stock counts, add stock, check out one item with a required reason, and confirm the movement appears in History. Test a second store to confirm inventory does not leak between stores.
+At the sign-in screen, select **Forgot password?** and enter the employee ID. If the account has a **verified** email, the app sends a **single-use reset link**, valid for **30 minutes**, to the saved address. Employee opens it, enters and confirms a new password meeting policy, then signs in.
 
+- The reset response is deliberately the same for existing and unknown employee IDs to avoid revealing who has accounts.
+- Reset links are random 256-bit tokens stored only as hashes in PostgreSQL.
+- Once used, a link becomes invalid. Successfully resetting a password revokes the employee's old bearer sessions.
+- Neither the employee ID alone nor an unverified mailbox is enough to reset a password.
+- If the company sender is offline, reset emails cannot be issued. Provide an administrator/support escalation process.
+
+### 5.7 Inactivity and session behavior
+
+The **visible countdown timer has been removed**. Once authenticated, a browser session expires **after 15 minutes without real user interaction**. Client interactions renew the corresponding server-side 15-minute expiry via `POST /api/auth/activity`; automatic 20-second inventory polling does **not** keep unattended sessions alive. Session expiry and logout require signing in again. The installer upgrade invalidates legacy sessions just once.
+
+### 5.8 Important self-registration security trade-off
+
+**Because no administrator approval code or pre-registered email is required, whoever first knows and activates an unused Employee ID can claim it with their own email address.** Email verification proves possession of the **submitted email address**, not employment identity. This design matches the requested low-friction onboarding, but it has a risk of employee-ID squatting or takeover. Restrict first-time registration to trusted staff networks / identity-aware access controls and avoid handing out IDs indiscriminately. OWNER bootstrap uses the installation token specifically to avoid global-admin takeover.
+
+### 5.9 First inventory entries
+
+For each store, create representative products with SKU, name, barcode if applicable, category/description, optional unit cost and minimum-stock threshold, and initial quantity. Test a scanner/camera, receive inventory, check out one part with a required note, edit the checkout note, and verify another location's records remain isolated.
+
+---
 ## 6. Choose DNS and configure optional Cloudflare/OPNsense DDNS
 
 You **do not need Cloudflare or OPNsense** to run the application. What you need is a registered/authorized hostname that resolves to a reachable HTTPS endpoint. Choose the simplest network arrangement that works for your site.
