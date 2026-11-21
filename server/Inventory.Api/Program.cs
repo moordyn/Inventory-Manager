@@ -515,6 +515,7 @@ app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthI
         save.Parameters.AddWithValue("employee",who.Value.employee);
         await save.ExecuteNonQueryAsync();
     }
+    await WriteAdminAudit(c,null,who.Value.employee,null,"oauth.configured",clientId,"Google OAuth client configuration updated");
     // Atomic reference swap activates imported credentials without restarting the API.
     googleCredentials=new GoogleOAuthCredentials(clientId,clientSecret);
     app.Logger.LogInformation("Global administrator {Admin} updated Google OAuth client configuration",who.Value.employee);
@@ -578,7 +579,9 @@ app.MapGet("/api/google/callback",async (string? code,string? state,string? erro
         if(!ValidEmail(email)||!profile.RootElement.GetProperty("email_verified").GetBoolean())return Results.Redirect(back+"unverified");
         await using var save=new NpgsqlCommand("INSERT INTO global_google_sender(id,email,refresh_token,connected_by) VALUES(1,@email,@token,@employee) ON CONFLICT(id) DO UPDATE SET email=excluded.email,refresh_token=excluded.refresh_token,connected_by=excluded.connected_by,connected_at=now()",c,tx);
         save.Parameters.AddWithValue("email",email);save.Parameters.AddWithValue("token",EncryptToken(refresh));save.Parameters.AddWithValue("employee",employee);
-        await save.ExecuteNonQueryAsync();await tx.CommitAsync();
+        await save.ExecuteNonQueryAsync();
+        await WriteAdminAudit(c,(NpgsqlTransaction)tx,employee,null,"gmail.connected",email,"Global sender authorized");
+        await tx.CommitAsync();
         return Results.Redirect(back+"connected");
     }catch(Exception ex){app.Logger.LogError(ex,"Global Google OAuth callback failed");return Results.Redirect(back+"failed");}
 });
@@ -586,8 +589,10 @@ app.MapPost("/api/google/disconnect",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(!who.Value.globalAdmin)return Results.Forbid();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("DELETE FROM global_google_sender WHERE id=1",c);
-    await cmd.ExecuteNonQueryAsync();
+    await using var tx=await c.BeginTransactionAsync();
+    await using var cmd=new NpgsqlCommand("DELETE FROM global_google_sender WHERE id=1",c,tx);
+    if(await cmd.ExecuteNonQueryAsync()>0)await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,null,"gmail.disconnected","Global sender","Google sender disconnected");
+    await tx.CommitAsync();
     return Results.Ok(new{disconnected=true});
 });
 
