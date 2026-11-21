@@ -123,7 +123,24 @@ jobs:
           if (!importer.includes(origin+'/api/google/callback') || importer.includes('inv.mrmschf.xyz')) {
             throw new Error('Google configuration importer is not using the new domain');
           }
-          console.log('Frontend, branding, scanner, access, reporting and administrative activity checks passed');
+          for (const marker of [
+            'data-edit-checkout-note', 'data-save-checkout-note',
+            'data-view-checkout-revisions', 'function noteCellMarkup(entry)',
+            'function openCheckoutNoteEditor(button,entry)',
+            'function productHistoryTable(events)'
+          ]) {
+            if (!html.includes(marker)) throw new Error('Editable checkout note UI missing: '+marker);
+          }
+          for (const endpoint of ['/api/movements/{id:long}/note','/api/movements/{id:long}/note-edits']) {
+            if (!backend.includes(endpoint)) throw new Error('Editable checkout note API missing: '+endpoint);
+          }
+          for (const field of ['movement_note_edits','note_revision','note_updated_by','note_updated_at']) {
+            if (!backend.includes(field)) throw new Error('Checkout note history migration missing: '+field);
+          }
+          if (!backend.includes('m.delta<0') || !backend.includes('req.ExpectedRevision!=revision')) {
+            throw new Error('Checkout-only note editing / optimistic concurrency checks missing');
+          }
+          console.log('Frontend, branding, scanner, reporting, audit and checkout note editing checks passed');
           NODE
 
       - name: Test API reporting, store permissions and administrator audit
