@@ -447,100 +447,107 @@ Confirm the IP is correct and that external HTTPS works after §7–§8. If on a
 
 ---
 
-## 7. Router rules and Nginx Proxy Manager
+## 7. Router rules and an HTTPS reverse proxy
 
-### 7.1 OPNsense NAT/firewall
+### 7.1 Choose the network entry point
 
-If using conventional inbound forwarding, create or verify **Firewall → NAT → Port Forward** rules:
+This section illustrates an **on-premise router + Nginx Proxy Manager (NPM)**. If you use a public VPS, configure its host/cloud firewall instead of home-router NAT. If you use a properly configured HTTPS tunnel, conventional WAN port forwards may not be needed. In all cases, the final site address must be exactly your `PUBLIC_ORIGIN`, and its TLS certificate must match your chosen hostname.
 
-| Interface | Protocol | Destination | External port | Internal target | Internal port |
-| --- | --- | --- | --- | --- | --- |
-| WAN | TCP | WAN address | **443** | <code>NPM_LAN_IP</code> | **443** |
-| WAN | TCP | WAN address | **80** (only if needed for HTTP/ACME redirect/challenge) | <code>NPM_LAN_IP</code> | **80** |
+### 7.2 Optional OPNsense port forwards
 
-Enable the associated WAN firewall rule or create an appropriately limited explicit rule. Use only the real NPM host IP. If you already host several domains behind NPM, these forwards may **already exist**—do not create competing routes or replace other hosts' working proxy configurations.
+For on-premise hosting with a reachable public IPv4, use your firewall/router's NAT settings. On **OPNsense** the typical page is **Firewall → NAT → Port Forward**:
 
-**Never forward these directly to the Internet:** PostgreSQL 5432, Inventory Manager 18424, NPM administration 81, or the application container's 8080.
+| Interface | Protocol | External destination/port | Forward destination | Internal port |
+| --- | --- | --- | --- | --- |
+| WAN | TCP | WAN address : **443** | `NPM_LAN_IP` | **443** |
+| WAN | TCP | WAN address : **80**, **only if required** for ACME/redirects | `NPM_LAN_IP` | **80** |
 
-Inside the LAN, NPM must be able to connect to <code>http://INVENTORY_LXC_IP:18424</code>. Confirm:
+Apply the associated firewall rules. Use the actual NPM LAN IP from your worksheet, not the app server's hostname or the example placeholder. If NPM already hosts other services, these rules may already exist; do not create duplicate/conflicting rules.
+
+**Never publish** Inventory Manager host port **18424**, internal API port **8080**, PostgreSQL **5432**, NPM admin port **81**, or Proxmox/OPNsense management ports to the Internet.
+
+Other routers use different menus but the same principle: Internet TLS traffic reaches the secured HTTPS proxy, **not** the app port directly. If your ISP uses CGNAT, a conventional WAN forward cannot work.
+
+### 7.3 Nginx Proxy Manager — recommended example
+
+NPM is an **external component**; the Inventory Manager installer does **not** install it. Install/manage NPM according to its [official setup guide](https://nginxproxymanager.com/setup/), keep its admin panel LAN/VPN-only, and give it access to the inventory host on LAN TCP/18424.
+
+From the **NPM server**, verify backend connectivity:
 
 ~~~bash
-# Run from the NPM host, if curl is installed:
+# Replace INVENTORY_LXC_IP with your actual Ubuntu host IPv4:
 curl -fsS http://INVENTORY_LXC_IP:18424/health
 ~~~
 
-If this fails, diagnose internal LXC firewall/network routing **before** debugging Cloudflare or Google OAuth.
+Then choose **Hosts → Proxy Hosts → Add Proxy Host** and use:
 
-### 7.2 Create the proxy host in NPM
-
-Open the existing **Nginx Proxy Manager** admin UI from your admin LAN/VPN. The official project commonly uses TCP/81 for its management UI; do not expose it publicly.
-
-Go to **Hosts → Proxy Hosts → Add Proxy Host** (labels may vary with NPM version):
-
-| Field | Value |
+| NPM field | Value |
 | --- | --- |
-| Domain names | **inventory.example.com** |
-| Scheme | **http** |
-| Forward hostname/IP | **INVENTORY_LXC_IP** |
-| Forward port | **18424** |
+| Domain Names | **Your own chosen hostname**, e.g. `inventory.example.com` |
+| Scheme (backend) | `http` |
+| Forward Hostname/IP | Your Ubuntu host's **LAN IP** (`INVENTORY_LXC_IP`) |
+| Forward Port | **18424** |
 | Block Common Exploits | Enable |
-| Websockets Support | Optional, safe to enable; this application does not require WebSockets for standard operation |
-| Access List | Use your selected security policy; not a replacement for proper app authentication |
+| WebSockets Support | Optional; not required for regular inventory operations |
+| Access List | Your approved security/access policy; still implement strong application authentication |
 
-The proxy **upstream scheme is HTTP** because TLS is terminated at NPM; the public visitor still uses HTTPS. Do not point the proxy to the <code>db</code> service or to port 5432. Do not enter the public domain as the upstream target (that can create a loop).
+Don't put the *public* domain in the Forward Hostname field (may loop back) or use port 5432. The upstream HTTP connection is private; the browser-facing site is HTTPS.
 
-Verify NPM can proxy a local request and that the Host header is correct. For WAN testing, use a phone on **cellular data**, not only Wi-Fi, to rule out split DNS and hairpin-NAT problems.
+### 7.4 Using another reverse proxy
 
-### 7.3 NPM installation if none exists
+A maintained alternative (Caddy, Traefik, Apache or nginx) can handle TLS and proxy requests to `http://INVENTORY_LXC_IP:18424`. Configure hostname routing, certificate issuance/renewal, client/body limits, forwarded headers and timeouts appropriately. The repository does **not** ship a configured proxy for these alternatives; follow that proxy's official documentation. Preserve `/api/google/callback` exactly and do **not** route it to a different application.
 
-NPM is separate software, not deployed by this application's installer. Its official setup is at https://nginxproxymanager.com/setup/ and includes its own Docker container, persistent configuration/certificate storage and admin account. Install NPM on an appropriately secured host before creating the proxy host.
+A separate identity-aware gateway or VPN is advised until employee authentication is hardened. Test any login gate's interaction with Google OAuth redirects.
 
-If other services already run on TCP/80 or TCP/443 on the NPM machine, resolve that port ownership; only one front-end listener can bind a given port on a given IP at a time. Preserve existing NPM proxy hosts and SSL certificates while adding this new one.
+### 7.5 External verification
 
-## 8. HTTPS, certificates and Cloudflare proxy
+Test your public HTTPS hostname over mobile data, **not only LAN Wi-Fi**, to catch split DNS/hairpin NAT differences. From the proxy host, verify upstream `/health`; from a public browser, verify the exact hostname, certificate, app login and API requests before proceeding to Google OAuth.
 
-### 8.1 Select one origin certificate strategy
+---
 
-**Recommended for ordinary external-browser access:** Use an NPM-managed **Let's Encrypt** certificate covering **inventory.example.com**. It must be valid and renewed. The standard HTTP challenge requires correct DNS/port-80 reachability; alternatively use a supported NPM DNS challenge with a separate, appropriately scoped DNS token.
+## 8. HTTPS, certificates and optional Cloudflare proxy
 
-**Cloudflare-proxied-only alternative:** Generate a **Cloudflare Origin CA** certificate in Cloudflare's SSL/TLS Origin Server area, covering the root domain, and import certificate **and private key** into NPM. The certificate is trusted by Cloudflare to connect to your origin but **not** generally by browsers accessing NPM directly while Cloudflare is bypassed. Never publish the private key or upload it to GitHub.
+### 8.1 Match the actual hostname
 
-Both strategies require a certificate that matches **inventory.example.com**; an old certificate issued only for <code>legacy.example.invalid</code> is not a substitute.
+Your public `PUBLIC_ORIGIN` must use **HTTPS** and your TLS certificate must cover its hostname. Example: a site at `inventory.example.com` needs a certificate covering `inventory.example.com` (a suitable wildcard may also cover it). An SSL certificate for `example.com` **does not necessarily** cover `inventory.example.com`.
 
-### 8.2 NPM SSL tab
+**General option — public ACME/Let's Encrypt certificate:** In Nginx Proxy Manager, request/import an appropriate public CA certificate for your hostname and ensure automatic renewal. HTTP-01 ACME challenges generally need port 80 reachability; DNS-01 challenges use your supported DNS provider and scoped DNS API access. This option works whether your domain uses Cloudflare DNS or another provider.
 
-On your Inventory Manager proxy host:
-1. Choose or request the certificate for <code>inventory.example.com</code>.
-2. Enable **Force SSL** after confirming HTTPS works and no redirect loop occurs.
-3. Enable HTTP/2 if your NPM build supports it.
-4. Enable relevant HSTS controls **only after** HTTPS and renewal are thoroughly validated; HSTS mistakes can lock clients into a broken HTTPS configuration.
+**Cloudflare Proxied option only:** You may instead use a Cloudflare Origin CA certificate between Cloudflare and your proxy. This certificate is trusted by Cloudflare **but not typically directly by browsers**. Only use it when the public site always passes through Cloudflare's proxy, and keep its private key secret. If you switch to DNS-only later, install a publicly trusted certificate first.
 
-### 8.3 Cloudflare SSL/TLS
+### 8.2 NPM SSL settings
 
-With the **Proxied** (orange cloud) A record, configure **Cloudflare → SSL/TLS → Overview → Full (strict)** and ensure NPM presents a matching, trusted origin certificate (public CA or Cloudflare Origin CA). Do **not** choose Flexible for this design.
+In your NPM Proxy Host for **your actual hostname**:
+1. Select/request the matching certificate.
+2. After confirming TLS and renewals, enable **Force SSL**.
+3. Optionally enable HTTP/2 where supported.
+4. Only enable strict HSTS after you know HTTPS is stable and recoverable.
 
-The two encrypted hops are:
-- Browser ↔ Cloudflare: Cloudflare edge certificate.
-- Cloudflare ↔ NPM: NPM origin certificate checked under **Full (strict)**.
+Do not expose the NPM admin page publicly. If you use a different proxy, use the equivalent certificate/TLS settings.
 
-Cloudflare's edge certificate alone does not replace the NPM-origin TLS setup. If you use **DNS only** instead, the visitor connects directly to NPM and therefore needs a public-browser-trusted certificate such as Let's Encrypt.
+### 8.3 Only when using Cloudflare orange-cloud proxy
 
-### 8.4 Check the public HTTPS site
+After DNS-only/HTTPS diagnostics, enable **Proxied** for the relevant DNS record if you want Cloudflare edge proxy features. In **Cloudflare → SSL/TLS**, select **Full (strict)** with a matching, valid origin certificate on your reverse proxy. Do not use Flexible. Cloudflare uses browser-to-edge and edge-to-origin TLS, so the edge certificate **does not replace** the origin certificate. [Cloudflare Full (strict) reference](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/).
 
-From a device outside your LAN, visit:
+If using a DNS provider **without** Cloudflare's reverse proxy, ignore Cloudflare's SSL mode entirely; visitors connect directly to the public HTTPS reverse proxy, which needs a public-browser-trusted certificate.
 
-- https://inventory.example.com/
-- https://inventory.example.com/health
+### 8.4 Confirm HTTPS before adding OAuth
 
-Check:
-- No browser certificate warning.
-- No NPM default landing page.
-- The inventory login interface loads.
-- The page and API calls return normally, not a Cloudflare 522/525/526 or NPM 502.
-- A known employee can sign in only after the chosen additional security controls are satisfied.
-- Camera permissions can be requested from a mobile browser over HTTPS.
+From an external device, open your own `PUBLIC_ORIGIN`:
+- e.g. `https://inventory.example.com/` — app login screen
+- e.g. `https://inventory.example.com/health` — app health JSON
 
-Avoid caching authenticated API responses in Cloudflare. **Do not** add cache-everything rules for <code>/api/*</code>, <code>/health</code> or signed-in HTML. If the UI appears stale after updates, clear the browser cache/hard refresh and check the deployed Git commit.
+Check the certificate, browser address, reverse proxy upstream and API connectivity. No certificate warning or wrong-site redirect should occur.
+
+Common failures:
+- 502 at the proxy: backend IP/port wrong, app container down, firewall blocks 18424.
+- Cloudflare 522: origin unreachable; 525/526: origin TLS/certificate failure.
+- Endless redirects: incorrect proxy/TLS scheme, Cloudflare Flexible mode, or conflicting Force SSL.
+- Google redirects to an unrelated domain: inspect `PUBLIC_ORIGIN` and the OAuth Web client settings.
+
+Do not cache authenticated API requests or sensitive HTML using CDN cache-everything rules. Test camera barcode scanning over HTTPS after login.
+
+---
 
 ## 9. Google Cloud OAuth and Gmail API
 
