@@ -49,7 +49,7 @@ These tests are required before calling a deployment production-ready. Automated
 
 ## Interactive login fluid simulation and accessibility
 
-- [ ] Idle login background stays theme-colored and does not continuously fill with smoke; simply moving the pointer without dragging does not flood the canvas.
+- [ ] Idle login background stays theme-colored without perpetual smoke generation. Normal mouse movement visibly displaces fluid; holding the mouse button intensifies it, without flooding the canvas.
 - [ ] Long repeated drags remain localized and fade rather than saturating the screen.
 - [ ] Fluid edges appear smooth on high-DPI phones/desktops; no blocky pixelation, including on Glacier Light.
 - [ ] Sidebar and mobile **Sign Out** buttons follow each active theme instead of a fixed brown warning color.
