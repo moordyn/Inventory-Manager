@@ -236,7 +236,7 @@ static class RepairQueueEndpoints
             return Results.Ok(new{updated=true,status=req.Status});
         });
         // Final settlement and physical pickup are recorded atomically.
-        // "Completed" means repair work is finished; pickup is a separate one-way event.
+        // "Ready for Pickup" or "Completed" allows a separate final payment/pickup confirmation.
         app.MapPost("/api/repairs/{id:long}/pickup",async (HttpContext ctx,long id,RepairPickupRequest req)=>{
             var who=await identity(ctx);if(who is null)return Results.Unauthorized();
             if(req.IdempotencyKey==Guid.Empty)
@@ -272,7 +272,7 @@ static class RepairQueueEndpoints
                 if(priorKey!=req.IdempotencyKey)return Results.Conflict("This repair has already been paid and picked up.");
                 return Results.Ok(new{duplicate=true,paidAndPickedUp=true,balanceDue=0m,pickedUpAt=priorPickup});
             }
-            if(status!="completed")return Results.Conflict("Finish the repair before marking it paid and picked up.");
+            if(status is not ("completed" or "ready"))return Results.Conflict("Mark the repair Ready for Pickup or Completed before confirming payment and pickup.");
             decimal earlierPayments;
             await using(var payments=new NpgsqlCommand("""
                 SELECT COALESCE(SUM(amount),0) FROM repair_payments WHERE repair_id=@id AND store_id=@store
