@@ -85,7 +85,7 @@ async Task<(string store,string employee,bool admin)?> Identity(HttpContext ctx)
     var token=auth[7..].Trim();
     if(token.Length!=64)return null;
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT store_id,employee_id,is_admin FROM sessions WHERE token_hash=@hash AND expires_at>now()",c);
+    await using var cmd=new NpgsqlCommand("SELECT sess.store_id,sess.employee_id,sess.is_admin FROM sessions sess WHERE sess.token_hash=@hash AND sess.expires_at>now() AND (sess.is_admin OR (EXISTS(SELECT 1 FROM employees e WHERE e.id=sess.employee_id AND e.active) AND EXISTS(SELECT 1 FROM employee_store_access a JOIN stores st ON st.id=a.store_id WHERE a.employee_id=sess.employee_id AND a.store_id=sess.store_id AND st.active)))",c);
     cmd.Parameters.AddWithValue("hash",Hash(token));
     await using var reader=await cmd.ExecuteReaderAsync();
     if(!await reader.ReadAsync())return null;
@@ -100,6 +100,10 @@ app.MapPost("/api/auth/employee-login",async (EmployeeLogin req)=>{
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT a.store_id FROM employee_store_access a JOIN employees e ON e.id=a.employee_id JOIN stores s ON s.id=a.store_id WHERE a.employee_id=@employee AND e.active AND s.active ORDER BY a.store_id LIMIT 1",c);
     cmd.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
+    await using(var count=new NpgsqlCommand("SELECT count(*) FROM employees WHERE id=@employee AND active",c)){
+        count.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
+        if((long)(await count.ExecuteScalarAsync()??0L)!=1)return Results.Unauthorized();
+    }
     var store=(string?)await cmd.ExecuteScalarAsync();
     if(store is null)return Results.Unauthorized();
     var token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
