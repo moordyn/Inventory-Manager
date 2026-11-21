@@ -120,8 +120,8 @@ jobs:
               !fluidSource.includes('ambientAt') ||
               !fluidSource.includes('Math.min(1.6,inkBudget'))
             throw new Error('Fluid motion missing pointer interaction or bounded ambient flow');
-          if (fluidSource.includes('now-ambient') || fluidSource.includes('function seed()'))
-            throw new Error('Background fluid must not inject dye continuously or seed moving clouds');
+          if (fluidSource.includes('function seed()') || !fluidSource.includes('if(now-ambientAt>2600)'))
+            throw new Error('Ambient fluid should be sparse and never seed full-screen clouds');
           if (!html.includes('#sidebarLogoutBtn,#mobileLogoutBtn') ||
               !html.includes('background:color-mix(in srgb,var(--accent) 13%,var(--raised))'))
             throw new Error('Sign-out buttons must follow the selected palette');
