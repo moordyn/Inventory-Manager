@@ -4,6 +4,34 @@ All notable changes to Inventory Manager are recorded here.
 
 This project uses [Semantic Versioning](https://semver.org/). Repository tags and published GitHub Releases identify immutable source snapshots; deploying a tagged version does **not** automatically update a running server.
 
+## [1.1.0] — Employee email activation and password recovery
+
+### Added
+- Individual employee ID + password login for all users, including store administrators and the global OWNER administrator.
+- Administrator remains responsible for creating only employee ID, name and store assignment; employees enter matching email and password twice during first-time self-enrollment.
+- Strong password policy (8–128 characters, uppercase, lowercase, number, symbol), with server-side validation and salted 600,000-iteration PBKDF2-SHA256 password hashes.
+- Single-use 24-hour email verification links; pending account credentials become active only after verification.
+- Forgot-password button with 30-minute single-use reset links, sent only to previously verified email addresses; password change revokes old sessions.
+- Server-enforced **15-minute inactivity expiry** renewed only by real user activity, not by automatic inventory polling.
+- No visible auto-sign-out countdown on desktop or mobile.
+- Per-installation Gmail API or SMTP delivery for authentication emails, independent of store low-stock recipient lists.
+- Test-only mail capture for complete PostgreSQL-backed integration coverage without sending real messages.
+
+### Changed
+- Legacy six-digit administrator PIN endpoint is retired (HTTP 410) and employee-ID-only access is disabled.
+- OWNER initial bootstrap now requires the original secret `SETUP_TOKEN` once to choose its email/password; OWNER can configure Gmail before verifying its bootstrap mailbox.
+- Google OAuth client JSON import now confirms the signed-in global administrator's account password rather than the legacy shared PIN.
+- One-time migration invalidates all old PIN/passwordless sessions, while preserving employee identities, inventory records and checkout history.
+- Account-specific session renewal uses an explicit `/api/auth/activity` endpoint.
+
+### Operational caveats
+- **First-claim enrollment risk:** Anyone who knows an unactivated employee ID can try to register their own mailbox before the real employee. Email verification proves mailbox access, not employment identity; restrict enrollment to trusted staff or use additional access controls.
+- **Setup mail dependency:** Employees cannot finish activation and cannot receive password-reset emails until a company Gmail API sender or SMTP sender is configured. The setup-token OWNER bootstrap is designed to break that first-install dependency; verify its mailbox once mail is configured.
+- **Upgrade caution:** Save your database and original `.env`, including `SETUP_TOKEN` and `GOOGLE_TOKEN_KEY`. The OWNER must bootstrap a new password after upgrading from v1.0.0; old PIN/ID-only sessions are revoked.
+- Browser, proxy, Gmail and backup-recovery behavior still require production-site acceptance testing.
+
+[1.1.0]: https://github.com/moordyn/Inventory-Manager/releases/tag/v1.1.0
+
 ## [1.0.0] — Initial release
 
 ### Features
