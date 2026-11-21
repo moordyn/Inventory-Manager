@@ -61,4 +61,4 @@ PY
 
 cd "$APP"
 docker compose --env-file .env -f deploy/compose.yml up -d --build
-echo "Google OAuth setup applied. Open Administration > Low-stock email alerts to connect a store account."
+echo "Google OAuth setup applied. Log in as a global administrator, then open Administration > Global email sender and connect the shared company Gmail account."
