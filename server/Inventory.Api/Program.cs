@@ -55,7 +55,7 @@ async Task<int> RemainingSignInLockSeconds(HttpContext ctx,string kind){
     return (int?)await cmd.ExecuteScalarAsync()??0;
 }
 IResult SignInLocked(HttpContext ctx,int seconds){
-    ctx.Response.Headers.RetryAfter=seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    ctx.Response.Headers["Retry-After"]=seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
     return Results.Json(new{error="Too many failed sign-in attempts.",retryAfterSeconds=seconds},statusCode:429);
 }
 async Task<IResult?> CheckSignInLock(HttpContext ctx,string kind){
@@ -72,11 +72,12 @@ async Task<IResult> RejectedSignIn(HttpContext ctx,string kind){
                         THEN 1 ELSE auth_login_failures.failures+1 END,
           last_failure=now(),
           blocked_until=CASE WHEN auth_login_failures.last_failure < now()-interval '5 minutes' THEN NULL
-                        WHEN auth_login_failures.failures+1>=5 THEN now()+interval '5 minutes'
+                        WHEN auth_login_failures.failures+1>=@threshold THEN now()+interval '5 minutes'
                         ELSE NULL END
         RETURNING GREATEST(0,CEIL(EXTRACT(EPOCH FROM (blocked_until-now()))))::integer
         """,c);
     cmd.Parameters.AddWithValue("key",SignInAttemptKey(ctx,kind));
+    cmd.Parameters.AddWithValue("threshold",MaxFailedSignIns);
     var seconds=(int)(await cmd.ExecuteScalarAsync()??0);
     return seconds>0?SignInLocked(ctx,seconds):Results.Unauthorized();
 }
