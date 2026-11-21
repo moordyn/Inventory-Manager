@@ -32,7 +32,8 @@ async Task<NpgsqlConnection> Connect() { var c = new NpgsqlConnection(cs); await
 static string CsvField(string? raw){
     var value=raw??"";
     // Escape spreadsheet formulas supplied in SKU/name/category/description.
-    if(value.Length>0&&"=+-@\t\r\n".Contains(value[0]))value="'"+value;
+    var trimmed=value.TrimStart(' ','\t','\r','\n');
+    if(trimmed.Length>0&&"=+-@".Contains(trimmed[0]))value="'"+value;
     return "\"" + value.Replace("\"","\"\"") + "\"";
 }
 static IResult CsvFile(string content,string filename){
@@ -307,8 +308,8 @@ app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();if(!who.Value.globalAdmin&&who.Value.store!=req.StoreId)return Results.Forbid();
     if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.StoreId)||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid employee details");
     await using var c=await Connect();
-    await using var tx=await c.BeginTransactionAsync();
     await using(var duplicate=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@id)",c)){duplicate.Parameters.AddWithValue("id",req.Id.Trim());if((bool)(await duplicate.ExecuteScalarAsync()??false))return Results.Conflict("Employee ID already exists. IDs must be unique across all stores.");}
+    await using var tx=await c.BeginTransactionAsync();
     await using var cmd=new NpgsqlCommand("INSERT INTO employees(store_id,primary_store_id,id,name) VALUES(@store,@store,@id,@name)",c,tx);
     cmd.Parameters.AddWithValue("store",req.StoreId.Trim());cmd.Parameters.AddWithValue("id",req.Id.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
     await cmd.ExecuteNonQueryAsync();
@@ -972,6 +973,7 @@ await using (var c=await Connect())
     CREATE UNIQUE INDEX IF NOT EXISTS items_store_barcode_idx ON items(store_id,barcode) WHERE barcode IS NOT NULL AND deleted_at IS NULL;
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS idempotency_key uuid;
     CREATE UNIQUE INDEX IF NOT EXISTS movements_idempotency_key_idx ON movements(idempotency_key) WHERE idempotency_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS movements_store_item_recent_idx ON movements(store_id,item_id,id DESC);
     """,c);
     await cmd.ExecuteNonQueryAsync();
 }
