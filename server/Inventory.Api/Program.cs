@@ -223,8 +223,8 @@ app.MapPost("/api/auth/select-store",async (HttpContext ctx,SelectStore req)=>{
     await using var c=await Connect();
     await using(var check=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employee_store_access a JOIN stores s ON s.id=a.store_id WHERE (a.employee_id=@employee AND a.store_id=@store AND s.active))",c)){
         check.Parameters.AddWithValue("employee",who.Value.employee);check.Parameters.AddWithValue("store",req.StoreId??"");
-        if(!who.Value.globalAdmin && !(bool)(await check.ExecuteScalarAsync()??false))return Results.Forbid();
-        if(who.Value.globalAdmin){await using var exists=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM stores WHERE id=@store AND active)",c);exists.Parameters.AddWithValue("store",req.StoreId??"");if(!(bool)(await exists.ExecuteScalarAsync()??false))return Results.Forbid();}
+        if(!who.Value.globalAdmin && !(bool)(await check.ExecuteScalarAsync()??false))return Results.StatusCode(StatusCodes.Status403Forbidden);
+        if(who.Value.globalAdmin){await using var exists=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM stores WHERE id=@store AND active)",c);exists.Parameters.AddWithValue("store",req.StoreId??"");if(!(bool)(await exists.ExecuteScalarAsync()??false))return Results.StatusCode(StatusCodes.Status403Forbidden);}
     }
     var auth=ctx.Request.Headers.Authorization.ToString()[7..].Trim();
     await using var cmd=new NpgsqlCommand("UPDATE sessions SET store_id=@store WHERE token_hash=@hash AND employee_id=@employee AND expires_at>now()",c);
@@ -232,7 +232,7 @@ app.MapPost("/api/auth/select-store",async (HttpContext ctx,SelectStore req)=>{
     return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{storeId=req.StoreId}):Results.Unauthorized();
 });
 app.MapGet("/api/admin/stores",async (HttpContext ctx)=>{
-    if((await Identity(ctx))?.globalAdmin!=true)return Results.Forbid();
+    if((await Identity(ctx))?.globalAdmin!=true)return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT id,name,active FROM stores ORDER BY id",c);
     await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
@@ -240,7 +240,7 @@ app.MapGet("/api/admin/stores",async (HttpContext ctx)=>{
     return Results.Ok(list);
 });
 app.MapPost("/api/admin/stores",async (HttpContext ctx,StoreRequest req)=>{
-    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.Forbid();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid store details");
     await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
     await using var cmd=new NpgsqlCommand("INSERT INTO stores(id,name) VALUES(@id,@name)",c,tx);
@@ -250,7 +250,7 @@ app.MapPost("/api/admin/stores",async (HttpContext ctx,StoreRequest req)=>{
     await tx.CommitAsync();return Results.Ok(new{created=true});
 });
 app.MapPut("/api/admin/stores/{id}/name",async (HttpContext ctx,string id,StoreNameRequest req)=>{
-    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.Forbid();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     var name=req.Name?.Trim();
     if(string.IsNullOrWhiteSpace(name)||name.Length>100)return Results.BadRequest("Location name must be 1–100 characters.");
     await using var c=await Connect();
@@ -262,7 +262,7 @@ app.MapPut("/api/admin/stores/{id}/name",async (HttpContext ctx,string id,StoreN
     await tx.CommitAsync();return Results.Ok(new{updated=true});
 });
 app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreRequest req)=>{
-    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.Forbid();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     var newId=req.Id?.Trim();var name=req.Name?.Trim();
     if(newId is null||!Regex.IsMatch(newId,@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(name)||name.Length>100)
         return Results.BadRequest("Store ID must be 2–24 letters, numbers, hyphens or underscores; name must be 1–100 characters.");
@@ -305,14 +305,14 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
     await tx.CommitAsync();return Results.Ok(new{id=newId,name});
 });
 app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
-    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT primary_store_id,id,name,active,global_admin FROM employees WHERE @global OR id IN(SELECT employee_id FROM employee_store_access WHERE store_id=@store) ORDER BY primary_store_id,id",c);
     cmd.Parameters.AddWithValue("global",who.Value.globalAdmin);cmd.Parameters.AddWithValue("store",who.Value.store);await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
     while(await r.ReadAsync())list.Add(new{storeId=r.GetString(0),id=r.GetString(1),name=r.GetString(2),active=r.GetBoolean(3),globalAdmin=r.GetBoolean(4)});
     return Results.Ok(list);
 });
 app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>{
-    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();if(!who.Value.globalAdmin&&who.Value.store!=req.StoreId)return Results.Forbid();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.StatusCode(StatusCodes.Status403Forbidden);if(!who.Value.globalAdmin&&who.Value.store!=req.StoreId)return Results.StatusCode(StatusCodes.Status403Forbidden);
     if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.StoreId)||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid employee details");
     await using var c=await Connect();
     await using(var duplicate=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@id)",c)){duplicate.Parameters.AddWithValue("id",req.Id.Trim());if((bool)(await duplicate.ExecuteScalarAsync()??false))return Results.Conflict("Employee ID already exists. IDs must be unique across all stores.");}
@@ -327,7 +327,7 @@ app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>
 });
 
 app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,SelectStore req)=>{
-    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();if(!who.Value.globalAdmin&&who.Value.store!=req.StoreId)return Results.Forbid();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.StatusCode(StatusCodes.Status403Forbidden);if(!who.Value.globalAdmin&&who.Value.store!=req.StoreId)return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var tx=await c.BeginTransactionAsync();
     await using var cmd=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id) VALUES(@employee,@store) ON CONFLICT DO NOTHING",c,tx);
@@ -340,9 +340,9 @@ app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,
 app.MapDelete("/api/admin/employees/{id}/stores/{storeId}",async (HttpContext ctx,string id,string storeId)=>{
     var who=await Identity(ctx);
     if(who is null)return Results.Unauthorized();
-    if(!await CanManageStore(ctx,storeId))return Results.Forbid();
+    if(!await CanManageStore(ctx,storeId))return Results.StatusCode(StatusCodes.Status403Forbidden);
     // Prevent a store administrator from revoking their own access mid-session.
-    if(!who.Value.globalAdmin&&id==who.Value.employee)return Results.Forbid();
+    if(!who.Value.globalAdmin&&id==who.Value.employee)return Results.StatusCode(StatusCodes.Status403Forbidden);
 
     await using var c=await Connect();
     await using var tx=await c.BeginTransactionAsync();
@@ -366,7 +366,7 @@ app.MapDelete("/api/admin/employees/{id}/stores/{storeId}",async (HttpContext ct
     return Results.Ok(new{removed=true,employeeId=id,storeId});
 });
 app.MapGet("/api/admin/employee-access",async (HttpContext ctx)=>{
-    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT employee_id,store_id,role FROM employee_store_access WHERE @global OR store_id=@store ORDER BY employee_id,store_id",c);
     cmd.Parameters.AddWithValue("global",who.Value.globalAdmin);cmd.Parameters.AddWithValue("store",who.Value.store);
@@ -376,7 +376,7 @@ app.MapGet("/api/admin/employee-access",async (HttpContext ctx)=>{
 });
 app.MapPut("/api/admin/employees/{id}/permissions",async (HttpContext ctx,string id,EmployeePermissions req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!who.Value.globalAdmin)return Results.Forbid();
+    if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     if(id=="OWNER" && !req.GlobalAdmin)return Results.BadRequest("The recovery administrator cannot be demoted.");
     await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
     await using(var update=new NpgsqlCommand("UPDATE employees SET global_admin=@global WHERE id=@id",c,tx)){
@@ -472,7 +472,7 @@ async Task SendGmail(string[] recipients,string subject,string body){
 }
 
 app.MapGet("/api/admin/google-oauth/config",async (HttpContext ctx)=>{
-    if((await Identity(ctx))?.globalAdmin!=true)return Results.Forbid();
+    if((await Identity(ctx))?.globalAdmin!=true)return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT client_id,updated_at FROM google_oauth_config WHERE id=1",c);
     await using var reader=await cmd.ExecuteReaderAsync();
@@ -487,7 +487,7 @@ app.MapGet("/api/admin/google-oauth/config",async (HttpContext ctx)=>{
 app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthImportRequest req)=>{
     var who=await Identity(ctx);
     if(who is null)return Results.Unauthorized();
-    if(!who.Value.globalAdmin)return Results.Forbid();
+    if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     if(googleKey is not {Length:32})return Results.BadRequest("The server encryption key is missing. Run the installer to configure GOOGLE_TOKEN_KEY first.");
     if(req.Json is null||req.Json.Length>24_576||req.Json.Length==0)return Results.BadRequest("Choose a Google OAuth JSON file smaller than 24 KB.");
     if(!PinValid(req.Pin))return Results.BadRequest("Enter the six-digit administrator PIN.");
@@ -549,7 +549,7 @@ app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthI
 // The Gmail sender is a single global account managed only by PIN-authenticated global admins.
 app.MapGet("/api/admin/google-sender",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!who.Value.globalAdmin)return Results.Forbid();
+    if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT email,connected_at FROM global_google_sender WHERE id=1",c);
     await using var r=await cmd.ExecuteReaderAsync();
@@ -558,7 +558,7 @@ app.MapGet("/api/admin/google-sender",async (HttpContext ctx)=>{
 });
 app.MapPost("/api/google/connect",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!who.Value.globalAdmin)return Results.Forbid();
+    if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     if(!GoogleReady())return Results.BadRequest("Google OAuth credentials are not configured on the server.");
     var state=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     var verifier=Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+','-').Replace('/','_');
@@ -611,7 +611,7 @@ app.MapGet("/api/google/callback",async (string? code,string? state,string? erro
 });
 app.MapPost("/api/google/disconnect",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!who.Value.globalAdmin)return Results.Forbid();
+    if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var tx=await c.BeginTransactionAsync();
     await using var cmd=new NpgsqlCommand("DELETE FROM global_google_sender WHERE id=1",c,tx);
@@ -622,7 +622,7 @@ app.MapPost("/api/google/disconnect",async (HttpContext ctx)=>{
 
 app.MapGet("/api/alerts/config",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    if(!await CanManageStore(ctx,who.Value.store))return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT enabled,recipients FROM store_alert_settings WHERE store_id=@store",c);
     cmd.Parameters.AddWithValue("store",who.Value.store);
@@ -636,7 +636,7 @@ app.MapGet("/api/alerts/config",async (HttpContext ctx)=>{
 });
 app.MapPut("/api/alerts/config",async (HttpContext ctx,AlertSettingsRequest req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    if(!await CanManageStore(ctx,who.Value.store))return Results.StatusCode(StatusCodes.Status403Forbidden);
     var recipients=ParseRecipients(req.Recipients);
     if(recipients.Length>10||recipients.Any(x=>!ValidEmail(x)))return Results.BadRequest("Enter up to 10 valid email addresses separated by commas.");
     if(req.Enabled&&recipients.Length==0)return Results.BadRequest("Add at least one recipient before enabling alerts.");
@@ -650,7 +650,7 @@ app.MapPut("/api/alerts/config",async (HttpContext ctx,AlertSettingsRequest req)
 });
 app.MapPost("/api/alerts/test",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    if(!await CanManageStore(ctx,who.Value.store))return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT s.name,COALESCE(a.recipients,'') FROM stores s LEFT JOIN store_alert_settings a ON a.store_id=s.id WHERE s.id=@store",c);
     cmd.Parameters.AddWithValue("store",who.Value.store);
@@ -779,7 +779,7 @@ app.MapGet("/api/items/{id:guid}/history",async (HttpContext ctx,Guid id)=>{
 });
 app.MapGet("/api/admin/audit",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(!who.Value.admin)return Results.Forbid();
+    if(!who.Value.admin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("""
         SELECT id,occurred_at,actor_employee_id,store_id,action,target,details
@@ -997,7 +997,7 @@ app.MapPost("/api/items/{id:guid}/delete",async (HttpContext ctx,Guid id,DeleteI
     var who=await Identity(ctx);
     if(who is null)return Results.Unauthorized();
     // Product removal is restricted to a store administrator or global administrator.
-    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    if(!await CanManageStore(ctx,who.Value.store))return Results.StatusCode(StatusCodes.Status403Forbidden);
     await using var c=await Connect();
     await using var tx=await c.BeginTransactionAsync();
     await using var find=new NpgsqlCommand("SELECT name FROM items WHERE id=@id AND store_id=@store AND deleted_at IS NULL FOR UPDATE",c,tx);
