@@ -1573,6 +1573,12 @@ await using (var c=await Connect())
     );
     ALTER TABLE repair_tickets ADD COLUMN IF NOT EXISTS request_key uuid;
     CREATE UNIQUE INDEX IF NOT EXISTS repair_tickets_request_key_idx ON repair_tickets(request_key) WHERE request_key IS NOT NULL;
+    -- Existing tickets adopt their check-in employee as technician too.
+    -- Keep attribution consistent even for tickets created before this change.
+    UPDATE repair_tickets SET assigned_to=created_by WHERE assigned_to IS DISTINCT FROM created_by;
+    ALTER TABLE repair_tickets DROP CONSTRAINT IF EXISTS repair_tickets_creator_assigned_check;
+    ALTER TABLE repair_tickets ADD CONSTRAINT repair_tickets_creator_assigned_check
+      CHECK (assigned_to IS NOT NULL AND assigned_to=created_by);
     CREATE INDEX IF NOT EXISTS repair_tickets_store_queue_idx
       ON repair_tickets(store_id,created_at,id);
     CREATE TABLE IF NOT EXISTS repair_parts(
