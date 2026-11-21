@@ -43,7 +43,7 @@ static IResult CsvFile(string content,string filename){
 async Task WriteAdminAudit(NpgsqlConnection conn,NpgsqlTransaction? tx,string actor,string? store,string action,string target,string details=""){
     await using var cmd=new NpgsqlCommand("INSERT INTO admin_audit(actor_employee_id,store_id,action,target,details) VALUES(@actor,@store,@action,@target,@details)",conn,tx);
     cmd.Parameters.AddWithValue("actor",actor);
-    cmd.Parameters.AddWithValue("store",(object?)store??DBNull.Value);
+    cmd.Parameters.Add("store",NpgsqlTypes.NpgsqlDbType.Text).Value=(object?)store??DBNull.Value;
     cmd.Parameters.AddWithValue("action",action);
     cmd.Parameters.AddWithValue("target",target);
     cmd.Parameters.AddWithValue("details",details);
