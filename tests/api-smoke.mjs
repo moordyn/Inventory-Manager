@@ -341,33 +341,63 @@ await call('repairs/'+createdRepair+'/parts/'+consumed1.partId+'/return',{
 });
 assert.equal((await call('items',{token:admin})).body.find(x=>x.id===id).quantity,5);
 assert.equal((await call('repairs/'+createdRepair,{token:admin})).body.parts.filter(p=>!p.returnedAt).length,1);
+// Only the upfront deposit is taken at check-in. Payment of the exact
+// remaining balance and pickup are confirmed in one idempotent action.
 const paymentKey=randomUUID();
-assert.equal((await call('repairs/'+createdRepair+'/payments',{token:admin,method:'POST',body:{
- amount:40,idempotencyKey:paymentKey
-},expect:200})).body.balanceDue,50);
-assert.equal((await call('repairs/'+createdRepair+'/payments',{token:admin,method:'POST',body:{
- amount:40,idempotencyKey:paymentKey
-},expect:200})).body.duplicate,true);
 await call('repairs/'+createdRepair+'/payments',{token:admin,method:'POST',body:{
- amount:51,idempotencyKey:randomUUID()
-},expect:400});
-assert.equal((await call('repairs/'+createdRepair,{token:admin})).body.ticket.balanceDue,50);
+ amount:40,idempotencyKey:paymentKey
+},expect:404});
+await call('repairs/'+createdRepair+'/pickup',{token:admin,method:'POST',body:{
+ idempotencyKey:paymentKey
+},expect:409});
+assert.equal((await call('repairs/'+createdRepair,{token:admin})).body.ticket.balanceDue,90);
 await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'completed'},expect:200});
+let awaiting=(await call('repairs',{token:admin})).body;
+assert.ok(awaiting.some(t=>t.id===createdRepair&&t.status==='completed'&&!t.pickedUpAt),
+ 'Completed repair must remain in queue until final pickup');
+const picked=(await call('repairs/'+createdRepair+'/pickup',{token:admin,method:'POST',body:{
+ idempotencyKey:paymentKey
+},expect:200})).body;
+assert.equal(picked.recordedPayment,90);
+assert.equal(picked.balanceDue,0);
+assert.equal(picked.paidAndPickedUp,true);
+assert.equal((await call('repairs/'+createdRepair+'/pickup',{token:admin,method:'POST',body:{
+ idempotencyKey:paymentKey
+},expect:200})).body.duplicate,true);
+await call('repairs/'+createdRepair+'/pickup',{token:admin,method:'POST',body:{
+ idempotencyKey:randomUUID()
+},expect:409});
+await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'in_progress'},expect:409});
+const afterPickup=(await call('repairs/'+createdRepair,{token:admin})).body;
+assert.equal(afterPickup.ticket.balanceDue,0);
+assert.ok(afterPickup.ticket.pickedUpAt&&afterPickup.ticket.pickedUpBy==='OWNER');
+assert.equal(afterPickup.payments.length,1);
+assert.equal(afterPickup.payments[0].amount,90);
+assert.equal(afterPickup.events.filter(e=>e.kind==='paid_picked_up').length,1);
+const pickupZero=(await call('repairs',{token:admin,method:'POST',body:{
+ device:'Zero balance device',repairType:'Paid upfront',quotedTotal:50,
+ paidUpfront:50,idempotencyKey:randomUUID()
+},expect:201})).body.id;
+await call('repairs/'+pickupZero+'/status',{token:admin,method:'PUT',body:{status:'completed'},expect:200});
+assert.equal((await call('repairs/'+pickupZero+'/pickup',{token:admin,method:'POST',body:{
+ idempotencyKey:randomUUID()
+},expect:200})).body.recordedPayment,0);
+assert.equal((await call('repairs/'+pickupZero,{token:admin})).body.payments.length,0);
 await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
  itemId:id,quantity:1,idempotencyKey:randomUUID()
 },expect:409});
 await call('repairs/'+laterRepair+'/status',{token:admin,method:'PUT',body:{status:'cancelled'},expect:200});
 repairQueue=(await call('repairs',{token:admin})).body;
 assert.equal(repairQueue.length,0);
-assert.equal((await call('repairs?history=true',{token:admin})).body.length,2);
+assert.equal((await call('repairs?history=true',{token:admin})).body.length,3);
 await call('auth/select-store',{token:admin,method:'POST',body:{storeId:'BRANCH2'},expect:200});
 assert.equal((await call('repairs',{token:admin})).body.length,0);
 await call('repairs/'+createdRepair,{token:admin,expect:404});
 await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
  itemId:id,quantity:1,idempotencyKey:partKey1
 },expect:404});
-await call('repairs/'+createdRepair+'/payments',{token:admin,method:'POST',body:{
- amount:40,idempotencyKey:paymentKey
+await call('repairs/'+createdRepair+'/pickup',{token:admin,method:'POST',body:{
+ idempotencyKey:paymentKey
 },expect:404});
 await call('repairs',{token:admin,method:'POST',body:repairBody,expect:404});
 await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'checked_in'},expect:404});
