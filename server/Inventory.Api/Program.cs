@@ -573,7 +573,7 @@ app.MapPost("/api/alerts/test",async (HttpContext ctx)=>{
     var useGoogle=GoogleReady()&&(bool)(await google.ExecuteScalarAsync()??false);
     if(!useGoogle&&!MailConfigured())return Results.BadRequest("The global administrator must connect a Gmail sender before test emails can be sent.");
     try{
-        var subject="Inventory Manager test — "+name;
+        var subject="ZAGG Inventory Manager test — "+name;
         var body="Test successful. Low-stock notifications for "+name+" will be sent to this address when enabled.";
         if(useGoogle)await SendGmail(recipients,subject,body);
         else await SendMail(recipients,subject,body);
