@@ -204,7 +204,7 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
             create.Parameters.AddWithValue("newId",newId);create.Parameters.AddWithValue("name",name);create.Parameters.AddWithValue("oldId",id);
             await create.ExecuteNonQueryAsync();
         }
-        foreach(var table in new[]{"items","movements","employees","employee_store_access","sessions","low_stock_state","alert_outbox","store_alert_settings"}){
+        foreach(var table in new[]{"items","movements","employees","employee_store_access","sessions","low_stock_state","alert_outbox","store_alert_settings","google_store_accounts","google_oauth_states"}){
             await using var move=new NpgsqlCommand($"UPDATE {table} SET store_id=@newId WHERE store_id=@oldId",c,tx);
             move.Parameters.AddWithValue("newId",newId);move.Parameters.AddWithValue("oldId",id);
             await move.ExecuteNonQueryAsync();
@@ -403,7 +403,10 @@ app.MapGet("/api/alerts/config",async (HttpContext ctx)=>{
     await using var r=await cmd.ExecuteReaderAsync();
     bool enabled=false;string recipients="";
     if(await r.ReadAsync()){enabled=r.GetBoolean(0);recipients=r.GetString(1);}
-    return Results.Ok(new{enabled,recipients,senderConfigured=MailConfigured()});
+    await using var googleCmd=new NpgsqlCommand("SELECT email FROM google_store_accounts WHERE store_id=@store",c);
+    googleCmd.Parameters.AddWithValue("store",who.Value.store);
+    var googleEmail=(string?)await googleCmd.ExecuteScalarAsync();
+    return Results.Ok(new{enabled,recipients,senderConfigured=MailConfigured()||googleEmail is not null,googleConfigured=GoogleReady(),googleEmail});
 });
 app.MapPut("/api/alerts/config",async (HttpContext ctx,AlertSettingsRequest req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
@@ -419,14 +422,15 @@ app.MapPut("/api/alerts/config",async (HttpContext ctx,AlertSettingsRequest req)
 app.MapPost("/api/alerts/test",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
-    if(!MailConfigured())return Results.BadRequest("Gmail SMTP is not configured on the server.");
+    if(!MailConfigured()&&!GoogleReady())return Results.BadRequest("No email sender configured.");
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT s.name,COALESCE(a.recipients,'') FROM stores s LEFT JOIN store_alert_settings a ON a.store_id=s.id WHERE s.id=@store",c);
+    await using var cmd=new NpgsqlCommand("SELECT s.name,COALESCE(a.recipients,''),g.email FROM stores s LEFT JOIN store_alert_settings a ON a.store_id=s.id LEFT JOIN google_store_accounts g ON g.store_id=s.id WHERE s.id=@store",c);
     cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r=await cmd.ExecuteReaderAsync();
     if(!await r.ReadAsync())return Results.NotFound();
     var name=r.GetString(0);var recipients=ParseRecipients(r.GetString(1));
     if(recipients.Length==0)return Results.BadRequest("Save at least one recipient first.");
+    var hasGoogle=!r.IsDBNull(2);
     try{await SendMail(recipients,"Inventory Manager test — "+name,"Test successful. Low-stock notifications for "+name+" will be sent to this address when enabled.");return Results.Ok(new{sent=true});}
     catch(Exception ex){app.Logger.LogError(ex,"SMTP test failed for {Store}",who.Value.store);return Results.Problem("Email could not be sent. Check the server's SMTP settings and logs.",statusCode:502);}
 });
@@ -603,19 +607,20 @@ app.Lifetime.ApplicationStopping.Register(()=>mailCts.Cancel());
 _ = Task.Run(async ()=>{
     while(!mailCts.IsCancellationRequested){
         try{
-            if(MailConfigured()){
+            if(MailConfigured()||GoogleReady()){
                 await using var c=await Connect();
                 await using var cmd=new NpgsqlCommand("""
-                SELECT o.id,o.store_id,o.subject,o.body,a.recipients
-                FROM alert_outbox o JOIN store_alert_settings a ON a.store_id=o.store_id
-                WHERE o.sent_at IS NULL AND o.next_attempt<=now() AND a.enabled AND a.recipients<>''
+                SELECT o.id,o.store_id,o.subject,o.body,a.recipients,(g.store_id IS NOT NULL)
+                FROM alert_outbox o JOIN store_alert_settings a ON a.store_id=o.store_id LEFT JOIN google_store_accounts g ON g.store_id=o.store_id
+                WHERE o.sent_at IS NULL AND o.next_attempt<=now() AND a.enabled AND a.recipients<>'' AND (g.store_id IS NOT NULL OR @smtp)
                 ORDER BY o.id LIMIT 20
                 """,c);
-                var pending=new List<(long id,string store,string subject,string body,string recipients)>();
-                await using(var r=await cmd.ExecuteReaderAsync()){while(await r.ReadAsync())pending.Add((r.GetInt64(0),r.GetString(1),r.GetString(2),r.GetString(3),r.GetString(4)));}
+                cmd.Parameters.AddWithValue("smtp",MailConfigured());
+                var pending=new List<(long id,string store,string subject,string body,string recipients,bool google)>();
+                await using(var r=await cmd.ExecuteReaderAsync()){while(await r.ReadAsync())pending.Add((r.GetInt64(0),r.GetString(1),r.GetString(2),r.GetString(3),r.GetString(4),r.GetBoolean(5)));}
                 foreach(var job in pending){
                     try{
-                        await SendMail(ParseRecipients(job.recipients),job.subject,job.body);
+                        if(job.google)await SendGmail(job.store,ParseRecipients(job.recipients),job.subject,job.body);else await SendMail(ParseRecipients(job.recipients),job.subject,job.body);
                         await using var done=new NpgsqlCommand("UPDATE alert_outbox SET sent_at=now() WHERE id=@id AND sent_at IS NULL",c);
                         done.Parameters.AddWithValue("id",job.id);await done.ExecuteNonQueryAsync();
                     }catch(Exception ex){
@@ -635,6 +640,8 @@ await using (var c=await Connect())
     CREATE TABLE IF NOT EXISTS settings(key text PRIMARY KEY,value text NOT NULL);
     CREATE TABLE IF NOT EXISTS stores(id text PRIMARY KEY,name text NOT NULL,active boolean NOT NULL DEFAULT true);
     CREATE TABLE IF NOT EXISTS store_alert_settings(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,enabled boolean NOT NULL DEFAULT false,recipients text NOT NULL DEFAULT '');
+    CREATE TABLE IF NOT EXISTS google_store_accounts(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,email text NOT NULL,refresh_token text NOT NULL,connected_by text NOT NULL,connected_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE IF NOT EXISTS google_oauth_states(state_hash text PRIMARY KEY,store_id text NOT NULL REFERENCES stores(id) ON UPDATE CASCADE,employee_id text NOT NULL,verifier text NOT NULL,expires_at timestamptz NOT NULL);
     CREATE TABLE IF NOT EXISTS low_stock_state(item_id uuid PRIMARY KEY,store_id text NOT NULL,is_low boolean NOT NULL DEFAULT false,cycle bigint NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS alert_outbox(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,store_id text NOT NULL,item_id uuid NOT NULL,alert_cycle bigint NOT NULL DEFAULT 0,subject text NOT NULL,body text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),sent_at timestamptz,attempts integer NOT NULL DEFAULT 0,next_attempt timestamptz NOT NULL DEFAULT now());
     CREATE UNIQUE INDEX IF NOT EXISTS alert_outbox_item_cycle_idx ON alert_outbox(item_id,alert_cycle);
