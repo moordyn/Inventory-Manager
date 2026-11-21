@@ -75,8 +75,10 @@ jobs:
             throw new Error('ZAGG favicon SVG is missing or malformed');
           }
           // Five coordinated theme palettes and matching branded SVGs must ship together.
-          const palettes = ['mint','purple','ocean','ember','rose'];
+          const palettes = ['mint','purple','ocean','ember','rose','slate','forest','gold','crimson','glacier'];
           for (const theme of palettes) {
+            if (!html.includes('body[data-theme="'+theme+'"]') ||
+                !html.includes(" "+theme+":{label:")) throw new Error('Missing CSS/selector for theme: '+theme);
             for (const asset of ['zagg-wordmark-','zagg-favicon-']) {
               const svg = fs.readFileSync(assetBase + asset + theme + '.svg','utf8');
               if (!svg.includes('<svg') || !svg.includes('viewBox=')) throw new Error('Invalid theme branding: '+asset+theme);
@@ -85,6 +87,9 @@ jobs:
           for (const marker of ['id="myThemeChoices"','id="loginThemeChoices"',
               'data-theme-choice=', 'function setTheme(theme)', 'themeMarkup(active)']) {
             if (!html.includes(marker)) throw new Error('Theme selector missing: '+marker);
+          }
+          if (!html.includes('name===\'glacier\'?\'light\':\'dark\'')) {
+            throw new Error('Glacier Light must switch the browser color scheme');
           }
           for (const endpoint of ['/api/auth/theme','/api/admin/theme/login']) {
             if (!fs.readFileSync('server/Inventory.Api/Program.cs','utf8').includes(endpoint))
