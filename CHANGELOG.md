@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 ## Unreleased — next feature release
 
+- Strengthened the existing theme-matched login and signed-in ambient animation brightness without changing their behavior, and coordinated login secondary buttons plus mobile Settings/Sign Out using theme palette variables.
+
 - Fixed mobile inventory, recent activity, checkout/product history, reorder, audit and bottom-navigation surfaces retaining hardcoded navy/green colors after changing themes. Mobile cards now inherit the active theme's raised surface color.
 
 
