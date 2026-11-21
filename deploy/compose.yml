@@ -11,6 +11,8 @@ services:
       GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
       GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
       GOOGLE_TOKEN_KEY: "${GOOGLE_TOKEN_KEY:-}"
+      # Legacy default keeps existing deployments working; new installations set PUBLIC_ORIGIN in .env.
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-https://zagginventorymanager.com}"
       ASPNETCORE_URLS: "http://+:8080"
     ports:
       - "18424:8080"
