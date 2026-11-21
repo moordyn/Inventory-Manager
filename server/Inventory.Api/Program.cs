@@ -209,14 +209,14 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
     await tx.CommitAsync();return Results.Ok(new{id=newId,name});
 });
 app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
-    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
-    await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT primary_store_id,id,name,active,global_admin FROM employees ORDER BY primary_store_id,id",c);
-    await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();
+    await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT primary_store_id,id,name,active,global_admin FROM employees WHERE @global OR id IN(SELECT employee_id FROM employee_store_access WHERE store_id=@store) ORDER BY primary_store_id,id",c);
+    cmd.Parameters.AddWithValue("global",who.Value.globalAdmin);cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("global",who.Value.globalAdmin);cmd.Parameters.AddWithValue("store",who.Value.store);await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
     while(await r.ReadAsync())list.Add(new{storeId=r.GetString(0),id=r.GetString(1),name=r.GetString(2),active=r.GetBoolean(3),globalAdmin=r.GetBoolean(4)});
     return Results.Ok(list);
 });
 app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>{
-    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();if(!who.Value.globalAdmin&&who.Value.store!=req.StoreId)return Results.Forbid();
     if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.StoreId)||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid employee details");
     await using var c=await Connect();
     await using(var duplicate=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@id)",c)){duplicate.Parameters.AddWithValue("id",req.Id.Trim());if((bool)(await duplicate.ExecuteScalarAsync()??false))return Results.Conflict("Employee ID already exists. IDs must be unique across all stores.");}
@@ -229,7 +229,7 @@ app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>
 });
 
 app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,SelectStore req)=>{
-    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();if(!who.Value.globalAdmin&&who.Value.store!=req.StoreId)return Results.Forbid();
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id) VALUES(@employee,@store) ON CONFLICT DO NOTHING",c);
     cmd.Parameters.AddWithValue("employee",id);cmd.Parameters.AddWithValue("store",req.StoreId??"");
@@ -238,7 +238,7 @@ app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,
 app.MapGet("/api/admin/employee-access",async (HttpContext ctx)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT employee_id,store_id,role FROM employee_store_access ORDER BY employee_id,store_id",c);
+    await using var cmd=new NpgsqlCommand("SELECT employee_id,store_id,role FROM employee_store_access WHERE @global OR store_id=@store ORDER BY employee_id,store_id",c);
     await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
     while(await r.ReadAsync())list.Add(new{employeeId=r.GetString(0),storeId=r.GetString(1),role=r.GetString(2)});
     return Results.Ok(list);
