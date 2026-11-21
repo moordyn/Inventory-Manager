@@ -403,6 +403,7 @@ app.MapGet("/api/alerts/config",async (HttpContext ctx)=>{
     await using var r=await cmd.ExecuteReaderAsync();
     bool enabled=false;string recipients="";
     if(await r.ReadAsync()){enabled=r.GetBoolean(0);recipients=r.GetString(1);}
+    await r.CloseAsync();
     await using var googleCmd=new NpgsqlCommand("SELECT email FROM google_store_accounts WHERE store_id=@store",c);
     googleCmd.Parameters.AddWithValue("store",who.Value.store);
     var googleEmail=(string?)await googleCmd.ExecuteScalarAsync();
