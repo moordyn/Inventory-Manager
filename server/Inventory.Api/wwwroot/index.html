@@ -611,6 +611,7 @@ function knownTheme(value){return Object.hasOwn(THEMES,value)?value:'mint'}
 function setTheme(theme){
  const name=knownTheme(theme);document.body.dataset.theme=name;
  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',THEMES[name].colors[0]);
+ document.querySelector('meta[name="color-scheme"]')?.setAttribute('content',name==='glacier'?'light':'dark');
  document.querySelectorAll('.brand-wordmark').forEach(img=>img.src='/assets/zagg-wordmark-'+name+'.svg');
  document.querySelector('link[rel="icon"]')?.setAttribute('href','/assets/zagg-favicon-'+name+'.svg');
 }
