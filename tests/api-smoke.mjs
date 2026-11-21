@@ -212,8 +212,7 @@ await call('admin/stores',{token:storeAdmin,method:'POST',body:{id:'NOPE',name:'
 
 // Only global administrators can edit IDs. Preserve store access and transaction ownership.
 await call('admin/employees/TESTUSER/id',{token:storeAdmin,method:'PUT',body:{newId:'RENAMEDUSER'},expect:403});
-await call('admin/employees/OWNER/id',{token:admin,method:'PUT',body:{newId:'RENAMEDOWNER'},expect:400});
-await call('admin/employees/TESTUSER/id',{token:admin,method:'PUT',body:{newId:'OWNER'},expect:400});
+await call('admin/employees/TESTUSER/id',{token:admin,method:'PUT',body:{newId:'OWNER'},expect:409});
 await call('admin/employees/TESTUSER/id',{token:admin,method:'PUT',body:{newId:'RENAMEDUSER'},expect:200});
 await call('auth/me',{token:storeAdmin,expect:401});
 await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:401});
@@ -244,4 +243,13 @@ await call('items/'+id+'/delete',{token:admin,method:'POST',body:{confirmation:'
 audit=(await call('admin/audit',{token:admin})).body;
 assert.ok(audit.some(x=>x.action==='product.deleted'&&x.target===id));
 assert.ok(!(await call('items/export',{token:admin})).body.includes('Test charging kit'));
+// OWNER may rename their own account without losing global privileges or creating a new bootstrap.
+await call('admin/employees/OWNER/id',{token:admin,method:'PUT',body:{newId:'PRIMARYADMIN'},expect:200});
+await call('auth/me',{token:admin,expect:401});
+assert.equal((await call('auth/status')).body.initialized,true);
+await call('auth/employee-login',{method:'POST',body:{employeeId:'OWNER',password:ownerPassword},expect:401});
+const newOwner=(await call('auth/employee-login',{method:'POST',body:{employeeId:'PRIMARYADMIN',password:ownerPassword},expect:200})).body.token;
+assert.equal((await call('auth/me',{token:newOwner})).body.isGlobalAdmin,true);
+await call('admin/employees/PRIMARYADMIN/permissions',{token:newOwner,method:'PUT',body:{globalAdmin:false,storeAdminIds:[]},expect:400});
+assert.ok((await call('admin/employees',{token:newOwner})).body.some(e=>e.id==='PRIMARYADMIN'));
 console.log('API smoke tests passed: password login, first-time email verification, one-use tokens, password reset/session revocation, CSV, checkout notes, store permissions and audit.');
