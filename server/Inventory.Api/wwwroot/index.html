@@ -757,7 +757,7 @@ function updateAccessActionState(){
  const store=adminStores.find(x=>x.id===storeId);
  const assigned=adminAccess.some(x=>x.employeeId===employeeId&&x.storeId===storeId);
  const protectedPrimary=!!employee&&employee.storeId===storeId;
- const protectedAdmin=!!employee?.globalAdmin&&!identity?.isGlobalAdmin;
+ const protectedAdmin=!!employee?.globalAdmin;
  const protectedSelf=employeeId===identity?.employeeId&&!identity?.isGlobalAdmin;
  const canRemove=!!employee&&!!store&&assigned&&!protectedPrimary&&!protectedAdmin&&!protectedSelf;
  $('removeStoreAccessBtn').disabled=!canRemove;
@@ -765,7 +765,8 @@ function updateAccessActionState(){
  $('accessActionHint').textContent=!employee||!store
   ?'Select an employee and location to manage store access.'
   :protectedPrimary?'This is the employee’s primary store. Primary store access cannot be removed.'
-  :protectedAdmin||protectedSelf?'This access assignment cannot be changed from your administrator account.'
+  :protectedAdmin?'Global administrators can already access every store. Change their global role before managing individual store assignments.'
+  :protectedSelf?'You cannot remove your own access to the currently managed store.'
   :assigned?'Access is currently granted to this location. Select Remove access to revoke it.'
   :'This employee does not have access to the selected location.';
 }
