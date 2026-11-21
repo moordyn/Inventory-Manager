@@ -467,7 +467,7 @@ function logout(send=true){
  if($('modalRoot').firstElementChild)closeModal();
  if(idleTimer!==null){clearInterval(idleTimer);idleTimer=null;}
  if(send&&token)api('auth/logout','POST').catch(()=>{});
- token='';identity=null;allowedStores=[];items=[];history=[];reorderRows=[];
+ token='';identity=null;allowedStores=[];items=[];history=[];productHistoryRows=[];activeProductHistoryItemId=null;reorderRows=[];$('recentHistory').innerHTML='';$('historyTable').innerHTML='';
  sessionStorage.removeItem('inventory-token');
  $('app').classList.add('hidden');$('auth').classList.remove('hidden');
  $('signedInEmployee').textContent='—';$('signedInEmployeeId').textContent='—';$('mobileEmployeeName').textContent='Employee';$('mobileIdleCountdown').textContent='';
@@ -940,7 +940,7 @@ $('storePicker').onchange=async e=>{
  const selected=e.target.value,previous=identity.storeId;
  try{
    await api('auth/select-store','POST',{storeId:selected});
-   identity=await api('auth/me');$('adminNav').classList.toggle('hidden',!identity.isAdmin);items=[];history=[];reorderRows=[];updateLocationBrand();
+   identity=await api('auth/me');$('adminNav').classList.toggle('hidden',!identity.isAdmin);items=[];history=[];productHistoryRows=[];activeProductHistoryItemId=null;reorderRows=[];$('recentHistory').innerHTML='';$('historyTable').innerHTML='';updateLocationBrand();
    $('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;
    navigate('overview');await load();toast('Store changed');
  }catch(err){e.target.value=previous;toast('Unable to switch stores: '+err.message,true)}
