@@ -21,7 +21,7 @@ for line in env_file.read_text(encoding="utf-8").splitlines():
     if "=" in line and not line.lstrip().startswith("#"):
         key, value = line.split("=", 1)
         values_from_env[key] = value
-public_origin = values_from_env.get("PUBLIC_ORIGIN", "https://zagginventorymanager.com")
+public_origin = values_from_env.get("PUBLIC_ORIGIN", "")
 if not re.fullmatch(r"https://[a-z0-9-]+(?:\.[a-z0-9-]+)+", public_origin):
     raise SystemExit("PUBLIC_ORIGIN in .env must be https://your-domain.example without a trailing slash.")
 expected_callback = public_origin + "/api/google/callback"
