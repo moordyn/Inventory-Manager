@@ -93,15 +93,20 @@ jobs:
           }
           const fluidSource=fs.readFileSync('server/Inventory.Api/wwwroot/assets/login-fluid.js','utf8');
           for (const marker of ['id="loginAurora"', 'class="login-aurora"',
-              'src="/assets/login-fluid.js"', 'window.createLoginFluid',
+              'src="/assets/login-fluid.js?v=2"', 'window.createLoginFluid',
               'loginAurora.stop()', 'loginAurora.start()']) {
             if (!html.includes(marker)) throw new Error('Login fluid view/lifecycle missing: '+marker);
           }
           for (const marker of ['webgl2', 'EXT_color_buffer_float', 'advect:', 'vorticity:',
               'divergence:', 'pressure:', 'subtract:', 'display:', 'pointermove',
-              "prefers-reduced-motion: reduce", 'visibilitychange', 'baseColor']) {
+              "prefers-reduced-motion: reduce", 'visibilitychange', 'smoothDye(', 'gestureInk', 'pointerdown']) {
             if (!fluidSource.includes(marker)) throw new Error('Login fluid simulation missing: '+marker);
           }
+          if (fluidSource.includes('now-ambient') || fluidSource.includes('function seed()'))
+            throw new Error('Background fluid must not inject dye continuously or seed moving clouds');
+          if (!html.includes('#sidebarLogoutBtn,#mobileLogoutBtn') ||
+              !html.includes('background:color-mix(in srgb,var(--accent) 13%,var(--raised))'))
+            throw new Error('Sign-out buttons must follow the selected palette');
           for (const marker of ['id="myThemeChoices"','id="loginThemeChoices"',
               'data-theme-choice=', 'function setTheme(theme)', 'themeMarkup(active)']) {
             if (!html.includes(marker)) throw new Error('Theme selector missing: '+marker);
