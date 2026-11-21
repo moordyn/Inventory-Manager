@@ -468,8 +468,8 @@ body[data-theme="glacier"] tbody tr:hover,
 
 /* Ambient login aurora. The canvas is visual-only; form controls retain all pointer access. */
 .login-screen{position:relative;isolation:isolate;overflow:hidden;background:var(--bg)}
-.login-aurora{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:.95}
-.login-screen::before{content:"";position:absolute;inset:-20%;z-index:0;pointer-events:none;background:radial-gradient(ellipse 46% 36% at 54% 44%,color-mix(in srgb,var(--accent) 9%,transparent),transparent 75%);filter:blur(60px)}
+.login-aurora{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:1}
+.login-screen::before{content:"";position:absolute;inset:-20%;z-index:0;pointer-events:none;background:radial-gradient(ellipse 46% 36% at 54% 44%,color-mix(in srgb,var(--accent) 22%,transparent),transparent 75%);filter:blur(60px)}
 .login-screen>.login-card{position:relative;z-index:1;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 24px 90px #0003}
 body[data-theme="glacier"] .login-screen>.login-card{background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 24px 80px #274c6b24}
 @media(prefers-reduced-motion:reduce){.login-aurora{display:none}.login-screen::before{filter:none}}
@@ -492,14 +492,44 @@ body[data-theme="glacier"] #mobileLogoutBtn:hover:not(:disabled){
   outline:2px solid var(--accent);outline-offset:2px;
 }
 
+/* Coordinated secondary/account actions, including mobile Settings + Sign out and
+   the login card's First-time setup + Forgot password links. No fixed blue/red. */
+#firstTimeSetupBtn,#forgotPasswordBtn,
+.mobile-account-actions .btn,
+#sidebarLogoutBtn,
+body[data-theme="glacier"] #firstTimeSetupBtn,
+body[data-theme="glacier"] #forgotPasswordBtn,
+body[data-theme="glacier"] .mobile-account-actions .btn,
+body[data-theme="glacier"] #sidebarLogoutBtn{
+  background:color-mix(in srgb,var(--active) 75%,var(--panel));
+  border:1px solid var(--active-border);
+  color:var(--text);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--accent) 10%,transparent);
+}
+#firstTimeSetupBtn:hover:not(:disabled),#forgotPasswordBtn:hover:not(:disabled),
+.mobile-account-actions .btn:hover:not(:disabled),
+#sidebarLogoutBtn:hover:not(:disabled),
+body[data-theme="glacier"] #firstTimeSetupBtn:hover:not(:disabled),
+body[data-theme="glacier"] #forgotPasswordBtn:hover:not(:disabled),
+body[data-theme="glacier"] .mobile-account-actions .btn:hover:not(:disabled),
+body[data-theme="glacier"] #sidebarLogoutBtn:hover:not(:disabled){
+  background:color-mix(in srgb,var(--accent) 22%,var(--active));
+  border-color:var(--accent);
+  color:var(--text);
+}
+#firstTimeSetupBtn:focus-visible,#forgotPasswordBtn:focus-visible,
+.mobile-account-actions .btn:focus-visible,#sidebarLogoutBtn:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;
+}
+
 /* Signed-in ambient background. Fixed viewport layer stays behind app UI and never accepts input. */
 #app.shell{position:relative;isolation:isolate;background:transparent}
 #app .app-aurora{position:fixed;inset:0;width:100vw;height:100dvh;z-index:0;pointer-events:none;opacity:1}
 #app.shell>.sidebar,#app.shell>.content{position:relative;z-index:1}
 #app.shell>.sidebar{position:sticky;background:color-mix(in srgb,var(--sidebar) 93%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
 #app.shell>.content{background:transparent}
-#app.shell>.content .card{background:color-mix(in srgb,var(--panel) 93%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srgb,var(--panel) 96%,transparent)}
+#app.shell>.content .card{background:color-mix(in srgb,var(--panel) 89%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srgb,var(--panel) 94%,transparent)}
 @media(max-width:760px){#app.shell>.sidebar{display:none}}
 @media(prefers-reduced-motion:reduce){
   #app .app-aurora{display:none}
@@ -779,17 +809,17 @@ const loginAurora=(()=>{
   for(const c of clouds){
    const x=c.x+Math.sin(tick*.85+c.phase)*width*.10;
    const y=c.y+Math.cos(tick*.62+c.phase)*height*.10;
-   bloom(x,y,c.radius,palette[c.tint],light?.105:.14);
+   bloom(x,y,c.radius,palette[c.tint],light?.19:.27);
   }
   if(pointer){
-   bloom(pointer.x,pointer.y,Math.max(135,Math.min(width,height)*.29),palette[0],light?.13:.20);
-   bloom(pointer.x+35,pointer.y-28,Math.max(90,Math.min(width,height)*.19),palette[1],light?.08:.11);
+   bloom(pointer.x,pointer.y,Math.max(135,Math.min(width,height)*.29),palette[0],light?.24:.34);
+   bloom(pointer.x+35,pointer.y-28,Math.max(90,Math.min(width,height)*.19),palette[1],light?.15:.22);
   }
   trails=trails.filter(t=>now-t.born<1600);
   for(const t of trails){
    const progress=(now-t.born)/1600;
    const spread=26+progress*125+t.power*22;
-   bloom(t.x+t.vx*progress*35,t.y+t.vy*progress*35,spread,palette[t.tint],(light?.22:.27)*Math.pow(1-progress,1.45));
+   bloom(t.x+t.vx*progress*35,t.y+t.vy*progress*35,spread,palette[t.tint],(light?.35:.42)*Math.pow(1-progress,1.45));
   }
  }
  function move(e){
@@ -884,7 +914,7 @@ const appAurora=(()=>{
    bloom(
     c.x*width+Math.sin(tick+c.phase)*width*.18,
     c.y*height+Math.cos(tick*.85+c.phase)*height*.14,
-    c.r,colors[c.color],light?.26:.38
+    c.r,colors[c.color],light?.37:.53
    );
   }
  }
