@@ -1,3 +1,5 @@
+using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Net;
 using System.Net.Mail;
 using System.Security.Cryptography;
@@ -284,6 +286,114 @@ async Task<bool> CanManageStore(HttpContext ctx,string store){
     cmd.Parameters.AddWithValue("employee",who.Value.employee);cmd.Parameters.AddWithValue("store",store);
     return (bool)(await cmd.ExecuteScalarAsync()??false);
 }
+
+const string GoogleRedirect="https://inv.mrmschf.xyz/api/google/callback";
+const string GmailScope="https://www.googleapis.com/auth/gmail.send";
+var googleId=Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")??"";
+var googleSecret=Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET")??"";
+var keyText=Environment.GetEnvironmentVariable("GOOGLE_TOKEN_KEY")??"";
+byte[]? googleKey=null;
+try{if(keyText.Length==64)googleKey=Convert.FromHexString(keyText);}catch(FormatException){}
+bool GoogleReady()=>googleId.Length>0&&googleSecret.Length>0&&googleKey is {Length:32};
+string EncryptToken(string value){
+    if(googleKey is null)throw new InvalidOperationException("Token encryption not configured");
+    var nonce=RandomNumberGenerator.GetBytes(12);var plain=Encoding.UTF8.GetBytes(value);var cipher=new byte[plain.Length];var tag=new byte[16];
+    using(var aes=new AesGcm(googleKey,16))aes.Encrypt(nonce,plain,cipher,tag);
+    return Convert.ToBase64String(nonce.Concat(tag).Concat(cipher).ToArray());
+}
+string DecryptToken(string value){
+    if(googleKey is null)throw new InvalidOperationException("Token encryption not configured");
+    var bytes=Convert.FromBase64String(value);var plain=new byte[bytes.Length-28];
+    using(var aes=new AesGcm(googleKey,16))aes.Decrypt(bytes.AsSpan(0,12),bytes.AsSpan(28),bytes.AsSpan(12,16),plain);
+    return Encoding.UTF8.GetString(plain);
+}
+using var googleHttp=new HttpClient{Timeout=TimeSpan.FromSeconds(20)};
+async Task<JsonDocument> TokenRequest(Dictionary<string,string> data){
+    using var response=await googleHttp.PostAsync("https://oauth2.googleapis.com/token",new FormUrlEncodedContent(data));
+    if(!response.IsSuccessStatusCode)throw new InvalidOperationException("Google token exchange failed: "+(int)response.StatusCode);
+    return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+}
+async Task SendGmail(string store,string[] recipients,string subject,string body){
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT email,refresh_token FROM google_store_accounts WHERE store_id=@store",c);
+    cmd.Parameters.AddWithValue("store",store);
+    string sender,refresh;
+    await using(var reader=await cmd.ExecuteReaderAsync()){
+        if(!await reader.ReadAsync())throw new InvalidOperationException("No Google account connected");
+        sender=reader.GetString(0);refresh=DecryptToken(reader.GetString(1));
+    }
+    using var tokens=await TokenRequest(new(){
+        ["client_id"]=googleId,["client_secret"]=googleSecret,["refresh_token"]=refresh,["grant_type"]="refresh_token"
+    });
+    var access=tokens.RootElement.GetProperty("access_token").GetString();
+    var safeSubject=Convert.ToBase64String(Encoding.UTF8.GetBytes(subject.Replace("\r"," ").Replace("\n"," ")));
+    var mime="From: "+sender+"\r\nTo: "+string.Join(", ",recipients)+"\r\nSubject: =?UTF-8?B?"+safeSubject+"?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"+Convert.ToBase64String(Encoding.UTF8.GetBytes(body));
+    var raw=Convert.ToBase64String(Encoding.UTF8.GetBytes(mime)).TrimEnd('=').Replace('+','-').Replace('/','_');
+    using var request=new HttpRequestMessage(HttpMethod.Post,"https://gmail.googleapis.com/gmail/v1/users/me/messages/send");
+    request.Headers.Authorization=new AuthenticationHeaderValue("Bearer",access);
+    request.Content=new StringContent(JsonSerializer.Serialize(new{raw}),Encoding.UTF8,"application/json");
+    using var response=await googleHttp.SendAsync(request);
+    if(!response.IsSuccessStatusCode)throw new InvalidOperationException("Gmail API send failed: "+(int)response.StatusCode);
+}
+app.MapPost("/api/google/connect",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    if(!GoogleReady())return Results.BadRequest("Google OAuth credentials are not configured on the server.");
+    var state=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+    var verifier=Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+','-').Replace('/','_');
+    var challenge=Convert.ToBase64String(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))).TrimEnd('=').Replace('+','-').Replace('/','_');
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("INSERT INTO google_oauth_states(state_hash,store_id,employee_id,verifier,expires_at) VALUES(@state,@store,@employee,@verifier,now()+interval '10 minutes')",c);
+    cmd.Parameters.AddWithValue("state",Hash(state));cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("employee",who.Value.employee);cmd.Parameters.AddWithValue("verifier",verifier);
+    await cmd.ExecuteNonQueryAsync();
+    var query=new Dictionary<string,string>{{"client_id",googleId},{"redirect_uri",GoogleRedirect},{"response_type","code"},{"scope","openid email "+GmailScope},{"access_type","offline"},{"prompt","consent"},{"state",state},{"code_challenge",challenge},{"code_challenge_method","S256"}};
+    return Results.Ok(new{url="https://accounts.google.com/o/oauth2/v2/auth?"+string.Join("&",query.Select(x=>Uri.EscapeDataString(x.Key)+"="+Uri.EscapeDataString(x.Value)))});
+});
+app.MapGet("/api/google/callback",async (string? code,string? state,string? error)=>{
+    const string back="/?google=";
+    if(error is not null||string.IsNullOrWhiteSpace(code)||string.IsNullOrWhiteSpace(state))return Results.Redirect(back+"cancelled");
+    if(!GoogleReady())return Results.Redirect(back+"not_configured");
+    try{
+        await using var c=await Connect();
+        await using var tx=await c.BeginTransactionAsync();
+        await using var cmd=new NpgsqlCommand("DELETE FROM google_oauth_states WHERE state_hash=@state AND expires_at>now() RETURNING store_id,employee_id,verifier",c,tx);
+        cmd.Parameters.AddWithValue("state",Hash(state));
+        string store,employee,verifier;
+        await using(var reader=await cmd.ExecuteReaderAsync()){
+            if(!await reader.ReadAsync())return Results.Redirect(back+"expired");
+            store=reader.GetString(0);employee=reader.GetString(1);verifier=reader.GetString(2);
+        }
+        await using var role=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@employee AND active AND global_admin) OR EXISTS(SELECT 1 FROM employee_store_access a JOIN employees e ON e.id=a.employee_id WHERE a.employee_id=@employee AND a.store_id=@store AND a.role='store_admin' AND e.active)",c,tx);
+        role.Parameters.AddWithValue("employee",employee);role.Parameters.AddWithValue("store",store);
+        if(!(bool)(await role.ExecuteScalarAsync()??false))return Results.Redirect(back+"unauthorized");
+        using var token=await TokenRequest(new(){
+            ["client_id"]=googleId,["client_secret"]=googleSecret,["code"]=code,
+            ["redirect_uri"]=GoogleRedirect,["grant_type"]="authorization_code",["code_verifier"]=verifier
+        });
+        var refresh=token.RootElement.TryGetProperty("refresh_token",out var rt)?rt.GetString():null;
+        if(string.IsNullOrWhiteSpace(refresh))return Results.Redirect(back+"no_refresh_token");
+        var access=token.RootElement.GetProperty("access_token").GetString();
+        using var profileRequest=new HttpRequestMessage(HttpMethod.Get,"https://openidconnect.googleapis.com/v1/userinfo");
+        profileRequest.Headers.Authorization=new AuthenticationHeaderValue("Bearer",access);
+        using var profileResponse=await googleHttp.SendAsync(profileRequest);
+        if(!profileResponse.IsSuccessStatusCode)throw new InvalidOperationException("Google profile lookup failed");
+        using var profile=JsonDocument.Parse(await profileResponse.Content.ReadAsStringAsync());
+        var email=profile.RootElement.GetProperty("email").GetString()??"";
+        if(!ValidEmail(email)||!profile.RootElement.GetProperty("email_verified").GetBoolean())return Results.Redirect(back+"unverified");
+        await using var save=new NpgsqlCommand("INSERT INTO google_store_accounts(store_id,email,refresh_token,connected_by) VALUES(@store,@email,@token,@employee) ON CONFLICT(store_id) DO UPDATE SET email=excluded.email,refresh_token=excluded.refresh_token,connected_by=excluded.connected_by,connected_at=now()",c,tx);
+        save.Parameters.AddWithValue("store",store);save.Parameters.AddWithValue("email",email);save.Parameters.AddWithValue("token",EncryptToken(refresh));save.Parameters.AddWithValue("employee",employee);
+        await save.ExecuteNonQueryAsync();await tx.CommitAsync();
+        return Results.Redirect(back+"connected");
+    }catch(Exception ex){app.Logger.LogError(ex,"Google OAuth callback failed");return Results.Redirect(back+"failed");}
+});
+app.MapPost("/api/google/disconnect",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("DELETE FROM google_store_accounts WHERE store_id=@store",c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);await cmd.ExecuteNonQueryAsync();
+    return Results.Ok(new{disconnected=true});
+});
 app.MapGet("/api/alerts/config",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
