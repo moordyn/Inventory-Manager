@@ -43,6 +43,15 @@ assert.match(login.token,/^[0-9A-F]{64}$/i);
 const admin=login.token;
 assert.equal((await call('auth/me',{token:admin})).body.isGlobalAdmin,true);
 assert.equal((await call('auth/me',{token:admin})).body.emailVerified,false);
+// Five themes are persisted per employee; only global admins choose the public login palette.
+assert.equal((await call('auth/status')).body.loginTheme,'mint');
+await call('auth/theme',{token:admin,method:'PUT',body:{theme:'invalid'},expect:400});
+await call('auth/theme',{token:admin,method:'PUT',body:{theme:'purple'},expect:200});
+assert.equal((await call('auth/me',{token:admin})).body.theme,'purple');
+await call('admin/theme/login',{token:admin,method:'PUT',body:{theme:'ocean'},expect:200});
+assert.equal((await call('auth/status')).body.loginTheme,'ocean');
+await call('admin/theme/login',{token:admin,method:'PUT',body:{theme:'invalid'},expect:400});
+
 await call('auth/send-verification',{token:admin,method:'POST',expect:200});
 const ownerCode=latestEmail(ownerEmail,'Verify your Inventory Manager email');
 assert.equal((await call('auth/token-info',{method:'POST',body:{token:ownerCode},expect:200})).body.purpose,'verify');
@@ -143,6 +152,10 @@ await call('auth/complete-token',{method:'POST',body:{token:activateCode},expect
 await call('auth/complete-token',{method:'POST',body:{token:activateCode},expect:400});
 let employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:200})).body.token;
 assert.equal((await call('auth/me',{token:employeeToken})).body.emailVerified,true);
+await call('admin/theme/login',{token:employeeToken,method:'PUT',body:{theme:'rose'},expect:403});
+await call('auth/theme',{token:employeeToken,method:'PUT',body:{theme:'ember'},expect:200});
+assert.equal((await call('auth/me',{token:employeeToken})).body.theme,'ember');
+
 // Account email changes only activate after proving possession of the new mailbox.
 await call('auth/change-email',{token:employeeToken,method:'POST',body:{
   email:'updated.employee@example.com',confirmEmail:'different@example.com',password:employeePassword
@@ -228,6 +241,7 @@ await call('auth/me',{token:storeAdmin,expect:401});
 await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER',password:employeePassword},expect:401});
 const renamedLogin=(await call('auth/employee-login',{method:'POST',body:{employeeId:'RENAMEDUSER',password:employeePassword},expect:200})).body.token;
 assert.equal((await call('auth/me',{token:renamedLogin})).body.employeeId,'RENAMEDUSER');
+assert.equal((await call('auth/me',{token:renamedLogin})).body.theme,'ember','Theme preference must survive employee ID changes');
 const renamedHistory=(await call('items/'+id+'/history',{token:admin})).body;
 assert.ok(renamedHistory.some(x=>x.employeeId==='RENAMEDUSER'));
 const renamedAccess=(await call('admin/employee-access',{token:admin})).body;
@@ -263,4 +277,4 @@ const newOwner=(await call('auth/employee-login',{method:'POST',body:{employeeId
 assert.equal((await call('auth/me',{token:newOwner})).body.isGlobalAdmin,true);
 await call('admin/employees/PRIMARYADMIN/permissions',{token:newOwner,method:'PUT',body:{globalAdmin:false,storeAdminIds:[]},expect:400});
 assert.ok((await call('admin/employees',{token:newOwner})).body.some(e=>e.id==='PRIMARYADMIN'));
-console.log('API smoke tests passed: password login, first-time email verification, one-use tokens, password reset/session revocation, CSV, checkout notes, store permissions and audit.');
+console.log('API smoke tests passed: five themes, login palette authorization, persistence, password login, first-time email verification, one-use tokens, password reset/session revocation, CSV, checkout notes, store permissions and audit.');
