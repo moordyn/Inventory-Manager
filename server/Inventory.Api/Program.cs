@@ -24,6 +24,42 @@ app.UseStaticFiles();
 var cs = builder.Configuration.GetConnectionString("Inventory") ?? throw new Exception("Missing database connection");
 var setupToken = Environment.GetEnvironmentVariable("SETUP_TOKEN") ?? throw new Exception("Missing setup token");
 if (setupToken.Length < 32 || setupToken.StartsWith("replace-")) throw new Exception("Invalid setup token");
+// Canonical external HTTPS origin is configured by the installing business.
+// Never infer it from untrusted request Host headers or silently use someone else's domain.
+var publicOriginText=Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"";
+if(!Uri.TryCreate(publicOriginText,UriKind.Absolute,out Uri? publicOriginUri)
+   || publicOriginUri.Scheme!=Uri.UriSchemeHttps
+   || publicOriginUri.HostNameType!=UriHostNameType.Dns
+   || !publicOriginUri.Host.Contains('.')
+   || !string.IsNullOrEmpty(publicOriginUri.UserInfo)
+   || publicOriginUri.AbsolutePath!="/"
+   || !string.IsNullOrEmpty(publicOriginUri.Query)
+   || !string.IsNullOrEmpty(publicOriginUri.Fragment)
+   || !publicOriginUri.IsDefaultPort
+   || publicOriginText.EndsWith("/",StringComparison.Ordinal)
+   || !string.Equals(publicOriginText,publicOriginUri.GetLeftPart(UriPartial.Authority),StringComparison.Ordinal))
+    throw new InvalidOperationException("PUBLIC_ORIGIN must be a canonical HTTPS URL such as https://inventory.example.com (without trailing slash, port, path, query or fragment).");
+var PublicOrigin=publicOriginText;
+var GoogleRedirect=PublicOrigin+"/api/google/callback";
+const string GmailScope="https://www.googleapis.com/auth/gmail.send";
+var googleCredentials=new GoogleOAuthCredentials(Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")??"",Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET")??"");
+var keyText=Environment.GetEnvironmentVariable("GOOGLE_TOKEN_KEY")??"";
+byte[]? googleKey=null;
+try{if(keyText.Length==64)googleKey=Convert.FromHexString(keyText);}catch(FormatException){}
+bool GoogleReady()=>googleCredentials.ClientId.Length>0&&googleCredentials.ClientSecret.Length>0&&googleKey is {Length:32};
+string EncryptToken(string value){
+    if(googleKey is null)throw new InvalidOperationException("Token encryption not configured");
+    var nonce=RandomNumberGenerator.GetBytes(12);var plain=Encoding.UTF8.GetBytes(value);var cipher=new byte[plain.Length];var tag=new byte[16];
+    using(var aes=new AesGcm(googleKey,16))aes.Encrypt(nonce,plain,cipher,tag);
+    return Convert.ToBase64String(nonce.Concat(tag).Concat(cipher).ToArray());
+}
+string DecryptToken(string value){
+    if(googleKey is null)throw new InvalidOperationException("Token encryption not configured");
+    var bytes=Convert.FromBase64String(value);var plain=new byte[bytes.Length-28];
+    using(var aes=new AesGcm(googleKey,16))aes.Decrypt(bytes.AsSpan(0,12),bytes.AsSpan(28),bytes.AsSpan(12,16),plain);
+    return Encoding.UTF8.GetString(plain);
+}
+using var googleHttp=new HttpClient{Timeout=TimeSpan.FromSeconds(20)};
 static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 static bool Equal(string a, string b) => CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
 // Password and email verification replace legacy shared PIN / employee-ID-only authentication.
@@ -639,42 +675,7 @@ async Task<bool> CanManageStore(HttpContext ctx,string store){
     return (bool)(await cmd.ExecuteScalarAsync()??false);
 }
 
-// Canonical external HTTPS origin is configured by the installing business.
-// Never infer it from untrusted request Host headers or silently use someone else's domain.
-var publicOriginText=Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"";
-if(!Uri.TryCreate(publicOriginText,UriKind.Absolute,out Uri? publicOriginUri)
-   || publicOriginUri.Scheme!=Uri.UriSchemeHttps
-   || publicOriginUri.HostNameType!=UriHostNameType.Dns
-   || !publicOriginUri.Host.Contains('.')
-   || !string.IsNullOrEmpty(publicOriginUri.UserInfo)
-   || publicOriginUri.AbsolutePath!="/"
-   || !string.IsNullOrEmpty(publicOriginUri.Query)
-   || !string.IsNullOrEmpty(publicOriginUri.Fragment)
-   || !publicOriginUri.IsDefaultPort
-   || publicOriginText.EndsWith("/",StringComparison.Ordinal)
-   || !string.Equals(publicOriginText,publicOriginUri.GetLeftPart(UriPartial.Authority),StringComparison.Ordinal))
-    throw new InvalidOperationException("PUBLIC_ORIGIN must be a canonical HTTPS URL such as https://inventory.example.com (without trailing slash, port, path, query or fragment).");
-var PublicOrigin=publicOriginText;
-var GoogleRedirect=PublicOrigin+"/api/google/callback";
-const string GmailScope="https://www.googleapis.com/auth/gmail.send";
-var googleCredentials=new GoogleOAuthCredentials(Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")??"",Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET")??"");
-var keyText=Environment.GetEnvironmentVariable("GOOGLE_TOKEN_KEY")??"";
-byte[]? googleKey=null;
-try{if(keyText.Length==64)googleKey=Convert.FromHexString(keyText);}catch(FormatException){}
-bool GoogleReady()=>googleCredentials.ClientId.Length>0&&googleCredentials.ClientSecret.Length>0&&googleKey is {Length:32};
-string EncryptToken(string value){
-    if(googleKey is null)throw new InvalidOperationException("Token encryption not configured");
-    var nonce=RandomNumberGenerator.GetBytes(12);var plain=Encoding.UTF8.GetBytes(value);var cipher=new byte[plain.Length];var tag=new byte[16];
-    using(var aes=new AesGcm(googleKey,16))aes.Encrypt(nonce,plain,cipher,tag);
-    return Convert.ToBase64String(nonce.Concat(tag).Concat(cipher).ToArray());
-}
-string DecryptToken(string value){
-    if(googleKey is null)throw new InvalidOperationException("Token encryption not configured");
-    var bytes=Convert.FromBase64String(value);var plain=new byte[bytes.Length-28];
-    using(var aes=new AesGcm(googleKey,16))aes.Decrypt(bytes.AsSpan(0,12),bytes.AsSpan(28),bytes.AsSpan(12,16),plain);
-    return Encoding.UTF8.GetString(plain);
-}
-using var googleHttp=new HttpClient{Timeout=TimeSpan.FromSeconds(20)};
+
 async Task<JsonDocument> TokenRequest(Dictionary<string,string> data){
     using var response=await googleHttp.PostAsync("https://oauth2.googleapis.com/token",new FormUrlEncodedContent(data));
     if(!response.IsSuccessStatusCode)throw new InvalidOperationException("Google token exchange failed: "+(int)response.StatusCode);
