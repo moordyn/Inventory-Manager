@@ -10,7 +10,7 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 
 - Added a separate passive signed-in dashboard background with more prominent, overlapping drifting theme-colored light clouds, slightly translucent/blurred surfaces, fixed-size viewport rendering, capped frame rate, reduced-motion fallback and no pointer interaction.
-- Refined the interactive login fluid after initial feedback: removed perpetual dye injection, limited ink per drag, increased dye resolution and smoothed rendering to avoid pixelation or full-screen saturation. Sign Out buttons now use each theme's colors.
+- Refined the interactive login fluid after feedback: restored normal mouse-motion interaction (with stronger click-drag), replaced a one-time drag cap with a regenerating ink budget, removed perpetual dye injection, increased dye resolution and smoothed rendering to avoid pixelation or full-screen saturation. Sign Out buttons now use each theme's colors.
 - Replaced the login screen's glow-trail aurora with a WebGL2 fluid-smoke simulation: drag-injected colored dye and momentum, vorticity, pressure projection, autonomous drift, theme-matched backgrounds (including Glacier Light), and a static reduced-motion/WebGL fallback.
 - Added ten cohesive palettes: Evergreen (mint), Deep Purple, Midnight Ocean, Copper Ember, Rose Noir, Arctic Slate, Forest Night, Champagne Gold, Crimson Night, and Glacier Light (**light mode**).
 - Employees choose their own persistent dashboard palette from **Settings → Appearance**, maintained by server-side account preferences and applied across devices.
