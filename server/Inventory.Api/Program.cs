@@ -174,7 +174,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // No shared PIN remains accepted for login after the password-authentication migration.
 app.MapGet("/api/auth/status", async ()=>{
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id='OWNER' AND active AND global_admin AND password_hash IS NOT NULL)",c);
+    await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=(SELECT value FROM settings WHERE key='owner_employee_id') AND active AND global_admin AND password_hash IS NOT NULL)",c);
     return Results.Ok(new{initialized=(bool)(await cmd.ExecuteScalarAsync()??false),loginMethod="password"});
 });
 app.MapPost("/api/auth/setup",async (Setup request)=>{
@@ -187,7 +187,7 @@ app.MapPost("/api/auth/setup",async (Setup request)=>{
     await using var cmd=new NpgsqlCommand("""
         UPDATE employees SET email=@email,password_hash=@hash,password_updated_at=now(),
             bootstrap_provisional=true
-        WHERE id='OWNER' AND active AND global_admin AND password_hash IS NULL
+        WHERE id=(SELECT value FROM settings WHERE key='owner_employee_id') AND active AND global_admin AND password_hash IS NULL
         """,c);
     cmd.Parameters.AddWithValue("email",email);
     cmd.Parameters.AddWithValue("hash",PasswordHash(request.Password!));
@@ -220,7 +220,7 @@ async Task<(string store,string employee,bool admin,bool globalAdmin)?> Identity
         SELECT sess.store_id,sess.employee_id,sess.is_admin FROM sessions sess
         JOIN employees e ON e.id=sess.employee_id AND e.active AND e.password_hash IS NOT NULL
         WHERE sess.token_hash=@hash AND sess.expires_at>now()
-          AND (e.email_verified_at IS NOT NULL OR (e.id='OWNER' AND e.global_admin AND e.bootstrap_provisional))
+          AND (e.email_verified_at IS NOT NULL OR (e.id=(SELECT value FROM settings WHERE key='owner_employee_id') AND e.global_admin AND e.bootstrap_provisional))
           AND ((sess.is_admin AND e.global_admin) OR
             EXISTS(SELECT 1 FROM employee_store_access a JOIN stores st ON st.id=a.store_id
               WHERE a.employee_id=sess.employee_id AND a.store_id=sess.store_id AND st.active))
@@ -282,9 +282,9 @@ app.MapPost("/api/auth/employee-login",async (HttpContext ctx,EmployeeLogin req)
             store=reader.IsDBNull(4)?null:reader.GetString(4);
         }
     }
-    if(passwordHash is null&&store is not null && !string.Equals(employeeId,"OWNER",StringComparison.Ordinal))
+    if(passwordHash is null&&store is not null && !provisional)
         return Results.Json(new{setupRequired=true,message="This employee ID requires first-time account setup."},statusCode:409);
-    if(!PasswordMatches(req.Password,passwordHash)||store is null||(!verified&&!(provisional&&global&&employeeId=="OWNER")))
+    if(!PasswordMatches(req.Password,passwordHash)||store is null||(!verified&&!(provisional&&global)))
         return await RejectedSignIn(ctx,"employee");
     var token=NewAuthCode();
     await using var insert=new NpgsqlCommand("""
@@ -335,7 +335,7 @@ app.MapPost("/api/auth/start-activation",async (HttpContext ctx,ActivateAccount 
         if(await r.ReadAsync()){found=true;currentHash=r.IsDBNull(0)?null:r.GetString(0);isGlobal=r.GetBoolean(1);}
     }
     if(!found)return Results.BadRequest("This employee ID is unavailable. Contact your administrator.");
-    if(isGlobal&&req.EmployeeId=="OWNER")return Results.BadRequest("The original OWNER must complete installation-token setup first.");
+    if(isGlobal&&currentHash is null)return Results.BadRequest("The original OWNER must complete installation-token setup first.");
     if(currentHash is not null)return Results.Conflict("This account is already active. Use Forgot password instead.");
     await using(var dup=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE lower(email)=@email AND id<>@id)",c,tx)){
         dup.Parameters.AddWithValue("email",email);dup.Parameters.AddWithValue("id",req.EmployeeId!);
@@ -635,12 +635,20 @@ app.MapPut("/api/admin/employees/{id}/id",async (HttpContext ctx,string id,Chang
     var newId=req.NewId?.Trim();
     if(newId is null||!Regex.IsMatch(newId,@"^[A-Za-z0-9_-]{2,24}$"))
         return Results.BadRequest("Employee ID must be 2–24 letters, numbers, underscores or hyphens.");
-    if(id=="OWNER"||newId=="OWNER")return Results.BadRequest("OWNER is a protected recovery ID.");
+    
     if(id==newId)return Results.BadRequest("New ID must differ.");
     await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
     await using(var check=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@id)",c,tx)){
         check.Parameters.AddWithValue("id",newId);
         if((bool)(await check.ExecuteScalarAsync()??false))return Results.Conflict("Employee ID already exists.");
+    }
+    // Serialize OWNER identifier changes and persist the new bootstrap identity.
+    await using(var ownerSetting=new NpgsqlCommand("SELECT value FROM settings WHERE key='owner_employee_id' FOR UPDATE",c,tx)){
+        var ownerId=(string?)await ownerSetting.ExecuteScalarAsync();
+        if(ownerId==id){
+            await using var setOwner=new NpgsqlCommand("UPDATE settings SET value=@new WHERE key='owner_employee_id'",c,tx);
+            setOwner.Parameters.AddWithValue("new",newId);await setOwner.ExecuteNonQueryAsync();
+        }
     }
     await using(var change=new NpgsqlCommand("UPDATE employees SET id=@new WHERE id=@old",c,tx)){
         change.Parameters.AddWithValue("new",newId);change.Parameters.AddWithValue("old",id);
@@ -715,7 +723,11 @@ app.MapGet("/api/admin/employee-access",async (HttpContext ctx)=>{
 app.MapPut("/api/admin/employees/{id}/permissions",async (HttpContext ctx,string id,EmployeePermissions req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
-    if(id=="OWNER" && !req.GlobalAdmin)return Results.BadRequest("The recovery administrator cannot be demoted.");
+    await using(var protect=await Connect()){
+        await using var owner=new NpgsqlCommand("SELECT value FROM settings WHERE key='owner_employee_id'",protect);
+        if(id==(string?)await owner.ExecuteScalarAsync()&&!req.GlobalAdmin)
+            return Results.BadRequest("The recovery administrator cannot be demoted.");
+    }
     await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
     await using(var update=new NpgsqlCommand("UPDATE employees SET global_admin=@global WHERE id=@id",c,tx)){
         update.Parameters.AddWithValue("global",req.GlobalAdmin);update.Parameters.AddWithValue("id",id);
@@ -1420,9 +1432,14 @@ await using (var c=await Connect())
     UPDATE employees SET primary_store_id=store_id WHERE primary_store_id IS NULL;
     CREATE TABLE IF NOT EXISTS employee_store_access(employee_id text NOT NULL,store_id text NOT NULL REFERENCES stores(id),PRIMARY KEY(employee_id,store_id));
     ALTER TABLE employee_store_access ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'employee';
-    INSERT INTO employees(store_id,id,name,primary_store_id) SELECT id,'OWNER','Original Administrator',id FROM stores WHERE NOT EXISTS(SELECT 1 FROM employees WHERE id='OWNER') ORDER BY id LIMIT 1 ON CONFLICT DO NOTHING;
+    INSERT INTO settings(key,value) VALUES ('owner_employee_id','OWNER') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO employees(store_id,id,name,primary_store_id)
+      SELECT id,(SELECT value FROM settings WHERE key='owner_employee_id'),'Original Administrator',id
+      FROM stores
+      WHERE NOT EXISTS(SELECT 1 FROM employees WHERE id=(SELECT value FROM settings WHERE key='owner_employee_id'))
+      ORDER BY id LIMIT 1 ON CONFLICT DO NOTHING;
     INSERT INTO employee_store_access(employee_id,store_id) SELECT id,store_id FROM employees ON CONFLICT DO NOTHING;
-    UPDATE employees SET global_admin=true WHERE id='OWNER';
+    UPDATE employees SET global_admin=true WHERE id=(SELECT value FROM settings WHERE key='owner_employee_id');
     CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY,expires_at timestamptz NOT NULL);
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT';
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS employee_id text NOT NULL DEFAULT 'OWNER';
