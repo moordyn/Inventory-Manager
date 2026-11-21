@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#141820"><title>Inventory Manager</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0d141d"><meta name="color-scheme" content="dark"><link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><title>Inventory Manager</title>
 <style>
 :root{font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;color:#f0f2f5;background:#141820;color-scheme:dark;--bg:#141820;--panel:#202630;--input:#303846;--line:#343d49;--muted:#a6b0be;--accent:#78c6a0;--amber:#e8b36b}*{box-sizing:border-box}body{margin:0}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}input,select,textarea{width:100%;background:var(--input);border:1px solid #485363;color:#fff;padding:11px 13px;border-radius:10px;outline:none}input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px #78c6a022}label{display:block;color:var(--muted);font-size:12px;font-weight:650;margin:10px 0 6px}h1,h2,h3,p{margin:0}h1{font-size:27px;letter-spacing:-.7px}h2{font-size:18px;letter-spacing:-.25px}h3{font-size:15px}small,.muted{color:var(--muted)}.hidden{display:none!important}.shell{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}.sidebar{background:#191e27;border-right:1px solid var(--line);padding:26px 15px;display:flex;flex-direction:column;gap:28px}.brand{display:flex;gap:12px;align-items:center;padding:3px 10px;font-weight:800;font-size:16px}.logo{width:36px;height:36px;border-radius:11px;background:#315b4d;display:grid;place-items:center;color:#b9f0d4;font-size:22px}.nav{display:grid;gap:5px}.nav button{width:100%;display:flex;align-items:center;gap:13px;padding:12px 13px;background:none;border:0;color:var(--muted);border-radius:10px;text-align:left;font-weight:600}.nav button.active,.nav button:hover{background:#2b353f;color:#f2f6f7}.nav button.active{box-shadow:inset 3px 0 var(--accent)}.nav button span{font-size:18px;width:22px;text-align:center}.sidebar-foot{margin-top:auto;border-top:1px solid var(--line);padding:18px 10px;color:var(--muted);font-size:12px}.content{min-width:0;padding:30px clamp(16px,3vw,50px) 70px;max-width:1550px;width:100%;margin:auto}.topbar{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:27px}.eyebrow{color:var(--muted);font-size:12px;margin-bottom:4px}.status{border:1px solid #365a4a;color:#9bdcb7;background:#1e382f;border-radius:30px;padding:7px 12px;font-size:12px;white-space:nowrap}.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px}.toolbar .search{flex:1;min-width:220px;max-width:600px}.btn{border:1px solid #45505c;background:#303a46;color:#eef2f5;padding:10px 15px;border-radius:10px;font-weight:650;white-space:nowrap}.btn:hover{filter:brightness(1.14)}.btn.primary{background:#78c6a0;color:#12261d;border-color:#78c6a0}.btn.ghost{background:transparent}.btn.warn{background:#604736;border-color:#86634b}.grid{display:grid;gap:16px}.stats{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:20px}.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;min-width:0}.stat-label{color:var(--muted);font-size:12px;font-weight:650}.stat-num{font-size:30px;font-weight:750;margin:8px 0 3px;letter-spacing:-1px}.stat-sub{color:var(--muted);font-size:12px}.accent{color:var(--accent)}.amber{color:var(--amber)}.section-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:18px}.section-head p{color:var(--muted);font-size:12px}.split{grid-template-columns:minmax(0,1.7fr) minmax(270px,1fr)}.action-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.action{display:flex;flex-direction:column;gap:14px;justify-content:space-between;min-height:165px}.action-icon{font-size:24px;color:var(--accent)}.action p{color:var(--muted);font-size:12px}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:left}th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.7px;font-weight:700;padding:11px 12px;border-bottom:1px solid var(--line);white-space:nowrap}td{padding:13px 12px;border-bottom:1px solid #303844;vertical-align:middle}tr:last-child td{border-bottom:0}tbody tr:hover{background:#ffffff06}.item-name{font-weight:650}.tag{font-size:11px;padding:4px 8px;border-radius:7px;background:#34404c;color:#bfc8d1;white-space:nowrap}.tag.low{background:#54402e;color:#f1c18b}.tag.ok{background:#244639;color:#99e0b7}.empty{padding:34px 12px;color:var(--muted);text-align:center}.view{display:none}.view.active{display:block}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}.span2{grid-column:span 2}.field-note{font-size:11px;color:var(--muted)}.modal-backdrop{position:fixed;inset:0;background:#080c12c9;z-index:50;display:grid;place-items:center;padding:15px}.modal{width:min(600px,100%);max-height:92vh;overflow:auto;background:#222a35;border:1px solid #46505c;border-radius:18px;padding:26px;box-shadow:0 24px 90px #0008}.modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.modal-head button{font-size:22px}.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.login-screen{min-height:100vh;display:grid;place-items:center;padding:20px}.login-card{width:min(420px,100%);padding:32px}.login-card .brand{padding:0;margin-bottom:26px}.login-card h1{font-size:24px;margin-bottom:8px}.login-card p{color:var(--muted);margin-bottom:22px}.login-card .btn{width:100%;margin-top:20px}.message{min-height:22px;margin:8px 0;color:var(--amber);font-size:13px}.scan-box{display:flex;gap:12px;align-items:center}.scan-box input{flex:1}.scan-box button{flex-shrink:0}.camera{width:100%;max-height:400px;background:#090c10;border-radius:12px;object-fit:cover}.mobile-nav{display:none}.toast{position:fixed;bottom:24px;right:24px;z-index:90;padding:12px 18px;border-radius:10px;background:#2d443b;border:1px solid #4c8d70;color:#dcf5e7;box-shadow:0 8px 30px #0007;max-width:min(420px,90vw)}.toast.error{background:#503a33;border-color:#aa735e;color:#ffe2d4}@media(max-width:1080px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.split{grid-template-columns:1fr}}@media(max-width:760px){.shell{display:block}.sidebar{display:none}.content{padding:22px 15px 95px}.stats{gap:10px}.card{padding:17px}.stat-num{font-size:25px}.action-grid{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.span2{grid-column:auto}.mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;z-index:30;background:#1b222c;border-top:1px solid var(--line);justify-content:space-around;padding:7px 3px max(7px,env(safe-area-inset-bottom))}.mobile-nav button{background:none;border:0;color:var(--muted);padding:6px 9px;font-size:11px}.mobile-nav button.active{color:var(--accent)}.mobile-nav span{display:block;font-size:20px}.topbar{margin-bottom:20px}.status{font-size:11px}.modal{padding:20px}}
 /* Refined visual system */
@@ -221,7 +221,16 @@ function historyTable(list){return list.length?'<table class="history-responsive
 function render(){if(!items)return;const q=$('globalScan').value.trim().toLowerCase();let list=items.filter(x=>(x.name+' '+x.sku+' '+(x.barcode||'')+' '+(x.category||'')).toLowerCase().includes(q));if($('stockFilter').value==='low')list=list.filter(x=>x.quantity<=x.minStock);if($('stockFilter').value==='available')list=list.filter(x=>x.quantity>0);$('inventoryTable').innerHTML=itemTable(list);$('recentItems').innerHTML=itemTable(items.slice(0,6));$('recentHistory').innerHTML=historyTable(history.slice(0,6));$('historyTable').innerHTML=historyTable(history);for(const direction of ['checkin','checkout']){const el=$(direction+'Item'),selected=el.value;el.innerHTML=items.map(x=>'<option value="'+x.id+'">'+esc(x.name)+' — '+esc(x.sku)+' ('+x.quantity+' in stock)</option>').join('');if(items.some(x=>x.id===selected))el.value=selected}}
 $('stockFilter').onchange=render;$('globalScan').oninput=()=>{if(page!=='inventory')navigate('inventory');else render()};
 $('globalScan').onkeydown=async e=>{if(e.key!=='Enter')return;e.preventDefault();const code=$('globalScan').value.trim();if(!code)return;const found=items.find(x=>x.sku.toLowerCase()===code.toLowerCase()||x.barcode?.toLowerCase()===code.toLowerCase());if(found){openMovement(found)}else{try{const remote=await api('items/lookup/'+encodeURIComponent(code));const item=items.find(x=>x.id===remote.id)||remote;openMovement(item)}catch{openItem(null,code)}}};
-function closeModal(){const el=$('modalRoot');el.innerHTML=''}
+let activeScannerStop=null;
+let scannerLibraryPromise=null;
+function scannerLibrary(){
+ if(!scannerLibraryPromise)scannerLibraryPromise=import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm').catch(err=>{scannerLibraryPromise=null;throw err});
+ return scannerLibraryPromise;
+}
+function closeModal(){
+ if(activeScannerStop)activeScannerStop();
+ $('modalRoot').innerHTML='';
+}
 function modal(title,body,footer=''){ $('modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h2>'+esc(title)+'</h2><button class="btn ghost" id="modalClose" aria-label="Close">×</button></div>'+body+footer+'</section></div>';$('modalClose').onclick=closeModal;document.querySelector('.modal-backdrop').onclick=e=>{if(e.target.classList.contains('modal-backdrop'))closeModal()}}
 function openItem(item=null,barcode=''){const edit=!!item;modal(edit?'Edit product':'Add new product','<form id="itemForm"><div class="form-grid"><div><label>SKU *</label><input name="sku" required value="'+esc(item?.sku||barcode)+'"></div><div><label>Barcode</label><input name="barcode" value="'+esc(item?.barcode||barcode)+'"></div><div class="span2"><label>Product name *</label><input name="name" required value="'+esc(item?.name||'')+'"></div><div><label>Category</label><input name="category" value="'+esc(item?.category||'')+'"></div><div><label>Minimum stock alert</label><input name="minStock" type="number" min="0" step="1" value="'+(item?.minStock??0)+'"></div><div><label>Unit cost ($)</label><input name="unitCost" type="number" min="0" step=".01" value="'+(item?.unitCost??'')+'"></div>'+(edit?'':'<div><label>Starting quantity</label><input name="quantity" type="number" min="0" step="1" value="0"></div>')+'<div class="span2"><label>Description</label><textarea name="description" rows="3">'+esc(item?.description||'')+'</textarea></div></div><div class="modal-actions"><button type="button" class="btn" id="cancelItem">Cancel</button><button class="btn primary">'+(edit?'Save changes':'Create product')+'</button></div>'+(edit&&identity?.isAdmin?'<div class="delete-action"><button type="button" class="btn warn" id="openDeleteItemBtn">Delete product…</button><small>Only administrators can delete products.</small></div>':'')+'</form>');if(edit&&identity?.isAdmin)$('openDeleteItemBtn').onclick=()=>openDeleteItem(item);$('cancelItem').onclick=closeModal;$('itemForm').onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;const form=new FormData(e.target),data=Object.fromEntries(form.entries());data.minStock=Number(data.minStock);data.unitCost=data.unitCost===''?null:Number(data.unitCost);if(!edit)data.quantity=Number(data.quantity);try{await api(edit?'items/'+item.id:'items',edit?'PUT':'POST',data);closeModal();toast(edit?'Product updated':'Product created');await load()}catch(err){toast(err.message,true)}finally{busy=false}}}
 function openDeleteItem(item){
@@ -248,68 +257,116 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-edit]');if
 $('newItemBtn').onclick=()=>openItem();$('logoutBtn').onclick=()=>logout();$('sidebarLogoutBtn').onclick=()=>logout();$('mobileLogoutBtn').onclick=()=>logout();$('refreshBtn').onclick=load;
 $('exportBtn').onclick=()=>{const rows=[['ID','Store','Employee','SKU','Name','Change','Before','After','Timestamp','Note'],...history.map(x=>[x.id,x.storeId||'',x.employeeId||'LEGACY',x.sku,x.name,x.delta,x.before,x.after,x.time,x.note||''])];const csv=rows.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='inventory-history.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 async function scanResult(code){$('globalScan').value=code;const found=items.find(x=>x.sku.toLowerCase()===code.toLowerCase()||x.barcode?.toLowerCase()===code.toLowerCase());if(found){openMovement(found)}else{try{const remote=await api('items/lookup/'+encodeURIComponent(code));openMovement(items.find(x=>x.id===remote.id)||remote)}catch{openItem(null,code)}}}
+// BarcodeDetector is hardware-accelerated where supported; ZXing is our Safari fallback.
+// Warm the fallback module before opening the camera when a browser has no native detector.
+$('cameraBtn').addEventListener('pointerenter',()=>{
+ if(!('BarcodeDetector' in window))scannerLibrary().catch(()=>{});
+},{once:true});
 $('cameraBtn').onclick=async()=>{
- let stopped=false,media=null,controls=null,frame=0;
- const stop=()=>{stopped=true;cancelAnimationFrame(frame);controls?.stop();media?.getTracks().forEach(t=>t.stop())};
- const close=()=>{stop();closeModal()};
- const success=code=>{if(stopped||!code)return;close();toast('Scanned: '+code);scanResult(code)};
- modal('Scan barcode','<video id="scanVideo" class="camera" autoplay playsinline muted></video><p id="scanStatus" class="muted" style="margin-top:10px">Position the barcode inside the camera view. Hold steady and make sure it is in focus.</p><p style="margin-top:12px"><button class="btn" id="scanManual">Enter barcode manually</button></p>');
- $('modalClose').onclick=close;
- document.querySelector('.modal-backdrop').onclick=e=>{if(e.target.classList.contains('modal-backdrop'))close()};
- $('scanManual').onclick=()=>{close();$('globalScan').focus()};
- const status=message=>{if(!stopped&&$('scanStatus'))$('scanStatus').textContent=message};
- const video=$('scanVideo');
- try{
-   media=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
-   if(stopped){stop();return}
-   video.srcObject=media;await video.play();
-   if('BarcodeDetector' in window){
-     try{
-       const desired=['ean_13','ean_8','upc_a','upc_e','code_128','code_39','qr_code','itf','codabar'];
-       const supported=typeof BarcodeDetector.getSupportedFormats==='function'?await BarcodeDetector.getSupportedFormats():desired;
-       const formats=desired.filter(x=>supported.includes(x));
-       if(formats.length){
-         const detector=new BarcodeDetector({formats});
-         let errors=0;
-         const detect=async()=>{
-           if(stopped)return;
-           try{
-             if(video.readyState>=2){
-               const results=await detector.detect(video);
-               if(results.length){success(results[0].rawValue);return}
-             }
-           }catch(e){
-             errors++;
-             if(errors>=3){status('Native scanner failed; switching to compatibility scanner…');await zxing();return}
-           }
-           if(!stopped)frame=requestAnimationFrame(detect);
-         };
-         status('Scanning with camera… Hold the barcode steady.');
-         frame=requestAnimationFrame(detect);
-         return;
-       }
-     }catch(e){status('Using compatibility scanner…')}
-   }
-   await zxing();
- }catch(e){close();toast('Camera error: '+e.message,true)}
- async function zxing(){
+ if(activeScannerStop)return;
+ if(!navigator.mediaDevices?.getUserMedia){toast('Camera scanning requires HTTPS and camera permission.',true);return}
+ let stopped=false,media=null,controls=null,frame=0,delay=0,torchOn=false,startingFallback=false;
+ const stop=()=>{
    if(stopped)return;
-   status('Loading compatibility barcode scanner…');
-   try{
-     const {BrowserMultiFormatReader}=await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm');
-     if(stopped)return;
-     media?.getTracks().forEach(t=>t.stop());media=null;
-     video.srcObject=null;
-     const reader=new BrowserMultiFormatReader();
-     controls=await reader.decodeFromConstraints({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}},video,(result,error)=>{
-       if(result)success(result.getText());
-     });
-     if(stopped)controls.stop();
-     else status('Scanning… Move closer, improve lighting, or rotate the barcode.');
-   }catch(e){status('Compatibility scanner unavailable: '+e.message+'. You can enter the barcode manually.')}
+   stopped=true;clearTimeout(delay);cancelAnimationFrame(frame);
+   if(controls){try{Promise.resolve(controls.stop()).catch(()=>{});}catch{}controls=null}
+   if(media){media.getTracks().forEach(track=>track.stop());media=null}
+   const video=$('scanVideo');if(video){video.pause();video.srcObject=null}
+   if(activeScannerStop===stop)activeScannerStop=null;
+ };
+ activeScannerStop=stop;
+ const success=code=>{
+   if(stopped||!code)return;
+   const result=String(code).trim();
+   if(!result)return;
+   stop();closeModal();
+   if(navigator.vibrate)navigator.vibrate(45);
+   toast('Barcode detected: '+result);
+   scanResult(result);
+ };
+ modal('Scan product barcode',`<div class="scanner-preview">
+  <video id="scanVideo" class="camera" autoplay playsinline muted aria-label="Live camera barcode preview"></video>
+  <div class="scanner-target" aria-hidden="true"><div class="scanner-corners"></div><div class="scanner-line"></div></div>
+ </div>
+ <p id="scanStatus" class="scanner-status" role="status" aria-live="polite">Starting rear camera…</p>
+ <div class="scanner-tools">
+   <button type="button" id="scannerTorch" class="btn" hidden>Turn on flashlight</button>
+   <button type="button" id="scanManual" class="btn ghost">Enter code manually</button>
+ </div>
+ <p class="scanner-hint">Place one barcode inside the guide, hold steady, and move the phone closer if needed. The result opens automatically.</p>`);
+ $('scanManual').onclick=()=>{closeModal();$('globalScan').focus()};
+ const status=(message)=>{if(!stopped&&$('scanStatus'))$('scanStatus').textContent=message};
+ const video=$('scanVideo');
+ let detector=null;
+ try{
+   if('BarcodeDetector' in window){
+     const desired=['ean_13','upc_a','ean_8','upc_e','code_128','code_39','itf','codabar','qr_code'];
+     const supported=typeof BarcodeDetector.getSupportedFormats==='function'?await BarcodeDetector.getSupportedFormats():desired;
+     const formats=desired.filter(x=>supported.includes(x));
+     if(formats.length)detector=new BarcodeDetector({formats});
+   }
+ }catch{detector=null}
+ // Start downloading the compatibility decoder while the browser requests camera access.
+ if(!detector)scannerLibrary().catch(()=>{});
+ try{
+   media=await navigator.mediaDevices.getUserMedia({
+     audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}
+   });
+   if(stopped){media.getTracks().forEach(t=>t.stop());return}
+   video.srcObject=media;
+   await video.play();
+   if(stopped)return;
+   const track=media.getVideoTracks()[0],capabilities=track?.getCapabilities?.()||{};
+   if(capabilities.torch){
+     const torchButton=$('scannerTorch');torchButton.hidden=false;
+     torchButton.onclick=async()=>{
+       try{
+         torchOn=!torchOn;
+         await track.applyConstraints({advanced:[{torch:torchOn}]});
+         torchButton.textContent=torchOn?'Turn off flashlight':'Turn on flashlight';
+       }catch{torchOn=false;status('Flashlight is unavailable on this camera. Continue scanning in good light.');torchButton.hidden=true}
+     };
+   }
+   const fallback=async()=>{
+     if(startingFallback||stopped)return;
+     startingFallback=true;
+     status('Scanning barcode…');
+     try{
+       const {BrowserMultiFormatReader}=await scannerLibrary();
+       if(stopped)return;
+       const reader=new BrowserMultiFormatReader(undefined,{delayBetweenScanAttempts:80,delayBetweenScanSuccess:120});
+       // Reuse the already-playing video; do not stop and reopen the camera.
+       controls=await reader.decodeFromVideoElement(video,(result)=>{
+         if(result)success(result.getText());
+       });
+       if(stopped&&controls){controls.stop();controls=null}
+     }catch(err){status('Scanner could not start: '+err.message+'. You can enter the barcode manually.')}
+   };
+   if(!detector){await fallback();return}
+   status('Scanning… Aim at a barcode to open it automatically.');
+   let nativeFailures=0,detecting=false;
+   const detect=async()=>{
+     if(stopped||startingFallback)return;
+     if(!detecting&&video.readyState>=2){
+       detecting=true;
+       try{
+         const results=await detector.detect(video);
+         if(stopped)return;
+         if(results.length){success(results[0].rawValue);return}
+       }catch{
+         nativeFailures++;
+         if(nativeFailures>=2){detecting=false;await fallback();return}
+       }finally{detecting=false}
+     }
+     if(!stopped&&!startingFallback)delay=setTimeout(()=>{frame=requestAnimationFrame(detect)},65);
+   };
+   frame=requestAnimationFrame(detect);
+ }catch(err){
+   if(stopped)return;
+   closeModal();
+   toast('Camera unavailable: '+(err?.message||'Check your camera permissions.'),true);
  }
 };
-
 $('adminLoginBtn').onclick=()=>authScreen('login');
 $('employeeLoginBtn').onclick=()=>authScreen('employeeLogin');
 $('employeeForm').onsubmit=async e=>{e.preventDefault();try{token=(await api('auth/employee-login','POST',{employeeId:$('employeeId').value.trim()})).token;sessionStorage.setItem('inventory-token',token);$('authMsg').textContent='';await enter()}catch(err){$('authMsg').textContent='Unable to sign in: '+err.message}};
