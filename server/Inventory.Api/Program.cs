@@ -78,18 +78,24 @@ app.MapPost("/api/auth/logout", async (HttpContext ctx) =>
     return Results.Ok();
 });
 
-async Task<(string store,string employee,bool admin)?> Identity(HttpContext ctx)
+async Task<(string store,string employee,bool admin,bool globalAdmin)?> Identity(HttpContext ctx)
 {
     var auth=ctx.Request.Headers.Authorization.ToString();
     if(!auth.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase))return null;
     var token=auth[7..].Trim();
     if(token.Length!=64)return null;
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT sess.store_id,sess.employee_id,sess.is_admin FROM sessions sess WHERE sess.token_hash=@hash AND sess.expires_at>now() AND (sess.is_admin OR (EXISTS(SELECT 1 FROM employees e WHERE e.id=sess.employee_id AND e.active) AND EXISTS(SELECT 1 FROM employee_store_access a JOIN stores st ON st.id=a.store_id WHERE a.employee_id=sess.employee_id AND a.store_id=sess.store_id AND st.active)))",c);
+    await using var cmd=new NpgsqlCommand("SELECT sess.store_id,sess.employee_id,sess.is_admin FROM sessions sess WHERE sess.token_hash=@hash AND sess.expires_at>now() AND ((sess.is_admin AND EXISTS(SELECT 1 FROM employees e WHERE e.id=sess.employee_id AND e.active AND e.global_admin)) OR (EXISTS(SELECT 1 FROM employees e WHERE e.id=sess.employee_id AND e.active) AND EXISTS(SELECT 1 FROM employee_store_access a JOIN stores st ON st.id=a.store_id WHERE a.employee_id=sess.employee_id AND a.store_id=sess.store_id AND st.active)))",c);
     cmd.Parameters.AddWithValue("hash",Hash(token));
     await using var reader=await cmd.ExecuteReaderAsync();
     if(!await reader.ReadAsync())return null;
-    return(reader.GetString(0),reader.GetString(1),reader.GetBoolean(2));
+    var store=reader.GetString(0);var employee=reader.GetString(1);var pinSession=reader.GetBoolean(2);
+    await reader.CloseAsync();
+    await using var roleCmd=new NpgsqlCommand("SELECT COALESCE((SELECT global_admin FROM employees WHERE id=@employee LIMIT 1),false),COALESCE((SELECT role='store_admin' FROM employee_store_access WHERE employee_id=@employee AND store_id=@store),false)",c);
+    roleCmd.Parameters.AddWithValue("employee",employee);roleCmd.Parameters.AddWithValue("store",store);
+    await using var roles=await roleCmd.ExecuteReaderAsync();await roles.ReadAsync();
+    var global=pinSession&&roles.GetBoolean(0);
+    return(store,employee,global||roles.GetBoolean(1),global);
 }
 app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
     var who=await Identity(ctx);
@@ -99,7 +105,7 @@ app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
     cmd.Parameters.AddWithValue("employee",who.Value.employee);
     cmd.Parameters.AddWithValue("store",who.Value.store);
     var employeeName=(string?)await cmd.ExecuteScalarAsync()??who.Value.employee;
-    return Results.Ok(new{storeId=who.Value.store,employeeId=who.Value.employee,employeeName,isAdmin=who.Value.admin});
+    return Results.Ok(new{storeId=who.Value.store,employeeId=who.Value.employee,employeeName,isAdmin=who.Value.admin,isGlobalAdmin=who.Value.globalAdmin});
 });
 app.MapPost("/api/auth/employee-login",async (EmployeeLogin req)=>{
     if(string.IsNullOrWhiteSpace(req.EmployeeId))return Results.Unauthorized();
@@ -129,7 +135,7 @@ app.MapGet("/api/auth/stores",async (HttpContext ctx)=>{
 });
 app.MapPost("/api/auth/select-store",async (HttpContext ctx,SelectStore req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
-    if(who.Value.admin)return Results.BadRequest("Administrator store switching is not supported.");
+    
     await using var c=await Connect();
     await using(var check=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employee_store_access a JOIN stores s ON s.id=a.store_id WHERE a.employee_id=@employee AND a.store_id=@store AND s.active)",c)){
         check.Parameters.AddWithValue("employee",who.Value.employee);check.Parameters.AddWithValue("store",req.StoreId??"");
@@ -141,7 +147,7 @@ app.MapPost("/api/auth/select-store",async (HttpContext ctx,SelectStore req)=>{
     return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{storeId=req.StoreId}):Results.Unauthorized();
 });
 app.MapGet("/api/admin/stores",async (HttpContext ctx)=>{
-    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    if((await Identity(ctx))?.globalAdmin!=true)return Results.Forbid();
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT id,name,active FROM stores ORDER BY id",c);
     await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
@@ -204,9 +210,9 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
 });
 app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
-    await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT primary_store_id,id,name,active FROM employees ORDER BY primary_store_id,id",c);
+    await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT primary_store_id,id,name,active,global_admin FROM employees ORDER BY primary_store_id,id",c);
     await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
-    while(await r.ReadAsync())list.Add(new{storeId=r.GetString(0),id=r.GetString(1),name=r.GetString(2),active=r.GetBoolean(3)});
+    while(await r.ReadAsync())list.Add(new{storeId=r.GetString(0),id=r.GetString(1),name=r.GetString(2),active=r.GetBoolean(3),globalAdmin=r.GetBoolean(4)});
     return Results.Ok(list);
 });
 app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>{
@@ -232,10 +238,29 @@ app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,
 app.MapGet("/api/admin/employee-access",async (HttpContext ctx)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT employee_id,store_id FROM employee_store_access ORDER BY employee_id,store_id",c);
+    await using var cmd=new NpgsqlCommand("SELECT employee_id,store_id,role FROM employee_store_access ORDER BY employee_id,store_id",c);
     await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
-    while(await r.ReadAsync())list.Add(new{employeeId=r.GetString(0),storeId=r.GetString(1)});
+    while(await r.ReadAsync())list.Add(new{employeeId=r.GetString(0),storeId=r.GetString(1),role=r.GetString(2)});
     return Results.Ok(list);
+});
+app.MapPut("/api/admin/employees/{id}/permissions",async (HttpContext ctx,string id,EmployeePermissions req)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!who.Value.globalAdmin)return Results.Forbid();
+    if(id=="OWNER" && !req.GlobalAdmin)return Results.BadRequest("The recovery administrator cannot be demoted.");
+    await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
+    await using(var update=new NpgsqlCommand("UPDATE employees SET global_admin=@global WHERE id=@id",c,tx)){
+        update.Parameters.AddWithValue("global",req.GlobalAdmin);update.Parameters.AddWithValue("id",id);
+        if(await update.ExecuteNonQueryAsync()!=1)return Results.NotFound();
+    }
+    await using(var clear=new NpgsqlCommand("UPDATE employee_store_access SET role='employee' WHERE employee_id=@id",c,tx)){
+        clear.Parameters.AddWithValue("id",id);await clear.ExecuteNonQueryAsync();
+    }
+    foreach(var store in (req.StoreAdminIds??Array.Empty<string>()).Distinct()){
+        await using var set=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id,role) VALUES(@id,@store,'store_admin') ON CONFLICT(employee_id,store_id) DO UPDATE SET role='store_admin'",c,tx);
+        set.Parameters.AddWithValue("id",id);set.Parameters.AddWithValue("store",store);
+        await set.ExecuteNonQueryAsync();
+    }
+    await tx.CommitAsync();return Results.Ok(new{updated=true});
 });
 app.MapGet("/api/items", async (HttpContext ctx) =>
 {
@@ -351,10 +376,13 @@ await using (var c=await Connect())
     INSERT INTO stores(id,name) SELECT 'DEFAULT','Original Store' WHERE NOT EXISTS(SELECT 1 FROM stores) ON CONFLICT DO NOTHING;
     CREATE TABLE IF NOT EXISTS employees(store_id text NOT NULL REFERENCES stores(id),id text NOT NULL,name text NOT NULL,active boolean NOT NULL DEFAULT true,PRIMARY KEY(store_id,id));
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS primary_store_id text;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS global_admin boolean NOT NULL DEFAULT false;
+    ALTER TABLE employee_store_access ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'employee';
     UPDATE employees SET primary_store_id=store_id WHERE primary_store_id IS NULL;
     CREATE TABLE IF NOT EXISTS employee_store_access(employee_id text NOT NULL,store_id text NOT NULL REFERENCES stores(id),PRIMARY KEY(employee_id,store_id));
     INSERT INTO employees(store_id,id,name,primary_store_id) SELECT id,'OWNER','Original Administrator',id FROM stores WHERE NOT EXISTS(SELECT 1 FROM employees WHERE id='OWNER') ORDER BY id LIMIT 1 ON CONFLICT DO NOTHING;
     INSERT INTO employee_store_access(employee_id,store_id) SELECT id,store_id FROM employees ON CONFLICT DO NOTHING;
+    UPDATE employees SET global_admin=true WHERE id='OWNER';
     CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY,expires_at timestamptz NOT NULL);
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT';
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS employee_id text NOT NULL DEFAULT 'OWNER';
@@ -392,3 +420,5 @@ record StoreRequest(string? Id,string? Name);
 record EmployeeRequest(string? StoreId,string? Id,string? Name);
 
 record StoreNameRequest(string? Name);
+
+record EmployeePermissions(bool GlobalAdmin,string[]? StoreAdminIds);
