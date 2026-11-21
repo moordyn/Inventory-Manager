@@ -27,6 +27,14 @@ The animation is a decorative, pointer-transparent HTML canvas located **behind*
 
 QA: check desktop mouse movement over the background, pointer movement over the login card, touch interaction, sign-out/relogin lifecycle, tab visibility, reduced-motion preferences, all ten themes, and low-performance mobile devices. Verify that forms, browser autofill, and submit buttons remain usable.
 
+## Animated signed-in background
+
+The main inventory application has its own **non-interactive, theme-matched ambient background**. Four oversized diffused light fields drift slowly behind the UI. Their colors come from each employee's selected theme (accent, active-border and muted colors), independent of the global login theme. Glacier Light renders them at lower intensity for white and pale surfaces.
+
+This canvas is fixed to the viewport, so scrolling through inventory and transaction history does not create a giant graphics buffer. It renders at no more than **20 frames per second**, caps device pixel ratio to **1.25**, and stays behind the sidebar, forms, cards, tables, and navigation. The background does not handle pointer input; only the separate sign-in aurora responds to user movement.
+
+The dashboard canvas starts when the user enters the signed-in UI, refreshes its colors immediately upon personal theme changes, and stops on logout, tab hiding or a system Reduce Motion preference. Reduce Motion produces a static theme-colored background instead of animation. No additional library or server feature flag is needed.
+
 ## Personal dashboard theme
 
 Every signed-in employee—including ordinary employees and all admins—can open **Settings → Appearance** and select any of the ten themes. The selection is stored in the server database as `employees.theme`, not merely browser local storage, so it remains available after logout and on other devices. The API validates the theme against the ten allowed IDs, and an authenticated employee may update **only their own** preference:
