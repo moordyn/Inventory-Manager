@@ -14,8 +14,19 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] OWNER initial setup uses the installation token with matching email/password fields, then password sign-in opens Home; the Administration tab appears only for authorized users.
 - [ ] Mobile bottom navigation contains Home, Items, In, Out, History and role-based Admin without clipping at 320, 375, 390 and 430 CSS pixels.
 - [ ] The mobile account header has a working Settings and Sign out button.
-- [ ] Inactivity countdown reaches sign out only after 30 seconds without interaction; valid activity resets it.
+- [ ] Silent 15-minute inactivity expiry signs out after genuine inactivity; normal interaction renews the session; background polling does not.
 - [ ] Changing store updates the location heading, products and permissions.
+
+### Account changes and renamed owner
+
+- [ ] Settings → Account security allows employees to enter a new email twice and confirm their current password.
+- [ ] Wrong password, unmatched emails and duplicate addresses are rejected without changing the current verified address.
+- [ ] Email changes use a one-time **30-minute** link delivered to the *new* address; the old address remains active until confirmation.
+- [ ] Confirmation changes the account email, invalidates existing sessions, and requires a new sign-in.
+- [ ] Ordinary employees and store administrators cannot change their own or another employee's ID (server returns 403).
+- [ ] Global administrator can rename a staff ID; store access, transaction attribution and login credentials still work under the new ID; old sessions are revoked.
+- [ ] Original owner can rename `OWNER` to a new ID, log back in as that ID, retain global privileges and remain unable to demote the recovery-owner account.
+- [ ] Restart and `/api/auth/status` after an OWNER rename: app remains initialized and does not create a second OWNER account.
 
 ## Responsive display
 - [ ] Test 320, 375, 390, 430, 760, 1024 and 1440 px viewports.
