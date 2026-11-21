@@ -726,7 +726,8 @@ app.MapPut("/api/admin/employees/{id}/id",async (HttpContext ctx,string id,Chang
         ("google_store_accounts","connected_by"),("global_google_sender","connected_by"),
         ("repair_tickets","created_by"),("repair_tickets","assigned_to"),
         ("repair_parts","scanned_by"),("repair_parts","returned_by"),
-        ("repair_payments","employee_id"),("repair_events","employee_id")
+        ("repair_payments","employee_id"),("repair_events","employee_id"),
+        ("repair_tickets","picked_up_by")
     }){
         await using var cmd=new NpgsqlCommand($"UPDATE {table} SET {column}=@new WHERE {column}=@old",c,tx);
         cmd.Parameters.AddWithValue("new",newId);cmd.Parameters.AddWithValue("old",id);
@@ -1577,6 +1578,11 @@ await using (var c=await Connect())
     -- Keep attribution consistent even for tickets created before this change.
     ALTER TABLE repair_tickets DROP CONSTRAINT IF EXISTS repair_tickets_creator_assigned_check;
     UPDATE repair_tickets SET assigned_to=created_by WHERE assigned_to IS DISTINCT FROM created_by;
+    ALTER TABLE repair_tickets ADD COLUMN IF NOT EXISTS picked_up_at timestamptz;
+    ALTER TABLE repair_tickets ADD COLUMN IF NOT EXISTS picked_up_by text;
+    ALTER TABLE repair_tickets ADD COLUMN IF NOT EXISTS pickup_request_key uuid;
+    CREATE UNIQUE INDEX IF NOT EXISTS repair_tickets_pickup_key_idx
+      ON repair_tickets(pickup_request_key) WHERE pickup_request_key IS NOT NULL;
     CREATE INDEX IF NOT EXISTS repair_tickets_store_queue_idx
       ON repair_tickets(store_id,created_at,id);
     CREATE TABLE IF NOT EXISTS repair_parts(
