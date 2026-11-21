@@ -178,49 +178,102 @@ async Task<(string store,string employee,bool admin,bool globalAdmin)?> Identity
     var auth=ctx.Request.Headers.Authorization.ToString();
     if(!auth.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase))return null;
     var token=auth[7..].Trim();
-    if(token.Length!=64)return null;
+    if(!Regex.IsMatch(token,@"^[0-9A-Fa-f]{64}$"))return null;
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT sess.store_id,sess.employee_id,sess.is_admin FROM sessions sess WHERE sess.token_hash=@hash AND sess.expires_at>now() AND ((sess.is_admin AND EXISTS(SELECT 1 FROM employees e WHERE e.id=sess.employee_id AND e.active AND e.global_admin)) OR (EXISTS(SELECT 1 FROM employees e WHERE e.id=sess.employee_id AND e.active) AND EXISTS(SELECT 1 FROM employee_store_access a JOIN stores st ON st.id=a.store_id WHERE a.employee_id=sess.employee_id AND a.store_id=sess.store_id AND st.active)))",c);
+    await using var cmd=new NpgsqlCommand("""
+        SELECT sess.store_id,sess.employee_id,sess.is_admin FROM sessions sess
+        JOIN employees e ON e.id=sess.employee_id AND e.active AND e.password_hash IS NOT NULL
+        WHERE sess.token_hash=@hash AND sess.expires_at>now()
+          AND (e.email_verified_at IS NOT NULL OR (e.id='OWNER' AND e.global_admin AND e.bootstrap_provisional))
+          AND ((sess.is_admin AND e.global_admin) OR
+            EXISTS(SELECT 1 FROM employee_store_access a JOIN stores st ON st.id=a.store_id
+              WHERE a.employee_id=sess.employee_id AND a.store_id=sess.store_id AND st.active))
+        """,c);
     cmd.Parameters.AddWithValue("hash",Hash(token));
     await using var reader=await cmd.ExecuteReaderAsync();
     if(!await reader.ReadAsync())return null;
-    var store=reader.GetString(0);var employee=reader.GetString(1);var pinSession=reader.GetBoolean(2);
+    var store=reader.GetString(0);var employee=reader.GetString(1);var globalSession=reader.GetBoolean(2);
     await reader.CloseAsync();
-    await using var roleCmd=new NpgsqlCommand("SELECT COALESCE((SELECT global_admin FROM employees WHERE id=@employee LIMIT 1),false),COALESCE((SELECT role='store_admin' FROM employee_store_access WHERE employee_id=@employee AND store_id=@store),false)",c);
+    await using var roleCmd=new NpgsqlCommand("""
+        SELECT COALESCE((SELECT global_admin FROM employees WHERE id=@employee LIMIT 1),false),
+        COALESCE((SELECT role='store_admin' FROM employee_store_access
+                  WHERE employee_id=@employee AND store_id=@store),false)
+        """,c);
     roleCmd.Parameters.AddWithValue("employee",employee);roleCmd.Parameters.AddWithValue("store",store);
-    await using var roles=await roleCmd.ExecuteReaderAsync();await roles.ReadAsync();
-    var global=pinSession&&roles.GetBoolean(0);
+    await using var roles=await roleCmd.ExecuteReaderAsync();
+    await roles.ReadAsync();
+    var global=globalSession&&roles.GetBoolean(0);
     return(store,employee,global||roles.GetBoolean(1),global);
 }
 app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
     var who=await Identity(ctx);
     if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT name FROM employees WHERE id=@employee ORDER BY CASE WHEN primary_store_id=@store THEN 0 ELSE 1 END LIMIT 1",c);
+    await using var cmd=new NpgsqlCommand("""
+        SELECT name,email,email_verified_at IS NOT NULL FROM employees
+        WHERE id=@employee ORDER BY CASE WHEN primary_store_id=@store THEN 0 ELSE 1 END LIMIT 1
+        """,c);
     cmd.Parameters.AddWithValue("employee",who.Value.employee);
     cmd.Parameters.AddWithValue("store",who.Value.store);
-    var employeeName=(string?)await cmd.ExecuteScalarAsync()??who.Value.employee;
-    return Results.Ok(new{storeId=who.Value.store,employeeId=who.Value.employee,employeeName,isAdmin=who.Value.admin,isGlobalAdmin=who.Value.globalAdmin});
+    await using var reader=await cmd.ExecuteReaderAsync();
+    if(!await reader.ReadAsync())return Results.Unauthorized();
+    return Results.Ok(new{
+        storeId=who.Value.store,employeeId=who.Value.employee,
+        employeeName=reader.GetString(0),email=reader.IsDBNull(1)?null:reader.GetString(1),
+        emailVerified=reader.GetBoolean(2),isAdmin=who.Value.admin,isGlobalAdmin=who.Value.globalAdmin
+    });
 });
 app.MapPost("/api/auth/employee-login",async (HttpContext ctx,EmployeeLogin req)=>{
     var locked=await CheckSignInLock(ctx,"employee");
     if(locked is not null)return locked;
-    if(string.IsNullOrWhiteSpace(req.EmployeeId))return await RejectedSignIn(ctx,"employee");
+    if(string.IsNullOrWhiteSpace(req.EmployeeId)||string.IsNullOrEmpty(req.Password))
+        return await RejectedSignIn(ctx,"employee");
+    var employeeId=req.EmployeeId.Trim();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT a.store_id FROM employee_store_access a JOIN employees e ON e.id=a.employee_id JOIN stores s ON s.id=a.store_id WHERE a.employee_id=@employee AND e.active AND s.active ORDER BY CASE WHEN a.store_id=e.primary_store_id THEN 0 ELSE 1 END,a.store_id LIMIT 1",c);
-    cmd.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
-    await using(var count=new NpgsqlCommand("SELECT count(*) FROM employees WHERE id=@employee AND active",c)){
-        count.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
-        if((long)(await count.ExecuteScalarAsync()??0L)!=1)return await RejectedSignIn(ctx,"employee");
+    await using var cmd=new NpgsqlCommand("""
+        SELECT e.password_hash,e.email_verified_at IS NOT NULL,e.bootstrap_provisional,e.global_admin,
+            (SELECT a.store_id FROM employee_store_access a JOIN stores st ON st.id=a.store_id AND st.active
+             WHERE a.employee_id=e.id
+             ORDER BY CASE WHEN a.store_id=e.primary_store_id THEN 0 ELSE 1 END,a.store_id LIMIT 1)
+        FROM employees e WHERE e.id=@employee AND e.active
+        """,c);
+    cmd.Parameters.AddWithValue("employee",employeeId);
+    string? passwordHash=null;bool verified=false,provisional=false,global=false;string? store=null;
+    await using(var reader=await cmd.ExecuteReaderAsync()){
+        if(await reader.ReadAsync()){
+            passwordHash=reader.IsDBNull(0)?null:reader.GetString(0);
+            verified=reader.GetBoolean(1);provisional=reader.GetBoolean(2);global=reader.GetBoolean(3);
+            store=reader.IsDBNull(4)?null:reader.GetString(4);
+        }
     }
-    var store=(string?)await cmd.ExecuteScalarAsync();
-    if(store is null)return await RejectedSignIn(ctx,"employee");
-    var token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-    await using var insert=new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) VALUES(@hash,now()+interval '8 hours',@store,@employee,false)",c);
-    insert.Parameters.AddWithValue("hash",Hash(token));insert.Parameters.AddWithValue("store",store);insert.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
+    if(passwordHash is null&&store is not null && !string.Equals(employeeId,"OWNER",StringComparison.Ordinal))
+        return Results.Json(new{setupRequired=true,message="This employee ID requires first-time account setup."},statusCode:409);
+    if(!PasswordMatches(req.Password,passwordHash)||store is null||(!verified&&!(provisional&&global&&employeeId=="OWNER")))
+        return await RejectedSignIn(ctx,"employee");
+    var token=NewAuthCode();
+    await using var insert=new NpgsqlCommand("""
+        INSERT INTO sessions(token_hash,expires_at,last_seen_at,store_id,employee_id,is_admin)
+        VALUES(@hash,now()+interval '15 minutes',now(),@store,@employee,@admin)
+        """,c);
+    insert.Parameters.AddWithValue("hash",Hash(token));insert.Parameters.AddWithValue("store",store);
+    insert.Parameters.AddWithValue("employee",employeeId);insert.Parameters.AddWithValue("admin",global);
     await insert.ExecuteNonQueryAsync();
     await SignInSucceeded(ctx,"employee");
-    return Results.Ok(new{token});
+    return Results.Ok(new{token,expiresInMinutes=SessionIdleMinutes});
+}).RequireRateLimiting("sensitive");
+// Only explicit user activity renews the 15-minute server-side session.
+// Background 20-second inventory polling does not keep an unattended session alive.
+app.MapPost("/api/auth/activity",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);
+    if(who is null)return Results.Unauthorized();
+    var bearer=ctx.Request.Headers.Authorization.ToString()[7..].Trim();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("""
+        UPDATE sessions SET last_seen_at=now(),expires_at=now()+interval '15 minutes'
+        WHERE token_hash=@hash AND expires_at>now()
+        """,c);
+    cmd.Parameters.AddWithValue("hash",Hash(bearer));
+    return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{renewed=true}):Results.Unauthorized();
 });
 app.MapGet("/api/auth/stores",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
