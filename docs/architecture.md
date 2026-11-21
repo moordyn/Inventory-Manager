@@ -4,7 +4,7 @@ Use the [documentation index](COMPLETE_DEPLOYMENT_GUIDE.md) for focused deployme
 
 ## Theme persistence and identity
 
-Five fixed dark palettes are applied to the same responsive interface. Personal themes are stored in `employees.theme`; the global login-screen theme lives in `settings.login_theme`. `GET /api/auth/status` exposes the current public login theme; authenticated users update their own preference via `PUT /api/auth/theme`, while `PUT /api/admin/theme/login` requires a global administrator. Branding assets include corresponding wordmarks and favicons. For palettes, asset conventions and validation see [Themes](themes.md).
+Ten fixed palettes (nine dark and one light) are applied to the same responsive interface. Personal themes are stored in `employees.theme`; the global login-screen theme lives in `settings.login_theme`. `GET /api/auth/status` exposes the current public login theme; authenticated users update their own preference via `PUT /api/auth/theme`, while `PUT /api/admin/theme/login` requires a global administrator. Branding assets include corresponding wordmarks and favicons. For palettes, asset conventions and validation see [Themes](themes.md).
 
 ## Current stack
 
