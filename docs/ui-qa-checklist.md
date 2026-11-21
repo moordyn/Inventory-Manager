@@ -47,6 +47,8 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] The public theme appears on new anonymous page loads, first-time setup, password reset and sign-out. A login restores the employee's personal theme.
 - [ ] Each theme's logo preserves shape/legibility; favicon and meta theme-color match.
 - [ ] Glacier Light switches the browser to light color-scheme; typography, tables, tags, buttons, inputs, modals, toasts, warnings and responsive cards remain readable, without light-on-light text.
+- [ ] Search field background, border, placeholder and focus/hover styling follow the selected palette on every theme, including Glacier Light.
+- [ ] Desktop inventory rows and responsive/mobile product cards use theme-colored hover highlighting instead of the old hardcoded charcoal/white overlay.
 - [ ] Glacier Light uses a dark-on-light logo; dark themes retain light-on-dark logos.
 - [ ] Verify readability, keyboard focus, contrast and iOS Safari/mobile navigation across all ten palettes.
 - [ ] Audit log includes `theme.login_changed`; no inventory or account permission changes result from changing appearance.
