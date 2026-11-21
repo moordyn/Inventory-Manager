@@ -63,7 +63,7 @@ app.MapPost("/api/auth/login", async (Login request) =>
     var parts = stored.Split(':');
     if (parts.Length != 2 || !Equal(PinHash(request.Pin!, Convert.FromHexString(parts[0])), parts[1])) return Results.Unauthorized();
     var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-    await using var insert = new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) VALUES(@h,now()+interval '8 hours','DEFAULT','OWNER',true)", c);
+    await using var insert = new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) SELECT @h,now()+interval '8 hours',e.primary_store_id,'OWNER',true FROM employees e WHERE e.id='OWNER' ORDER BY e.primary_store_id LIMIT 1", c);
     insert.Parameters.AddWithValue("h", Hash(token));
     await insert.ExecuteNonQueryAsync();
     return Results.Ok(new { token });
@@ -163,7 +163,7 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
     var newId=req.Id?.Trim();var name=req.Name?.Trim();
     if(newId is null||!Regex.IsMatch(newId,@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(name)||name.Length>100)
         return Results.BadRequest("Store ID must be 2–24 letters, numbers, hyphens or underscores; name must be 1–100 characters.");
-    if(id=="DEFAULT" && newId!="DEFAULT")return Results.BadRequest("The original DEFAULT store ID cannot be changed. Its name can be edited.");
+    
     await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
     await using(var exists=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM stores WHERE id=@id)",c,tx)){
         exists.Parameters.AddWithValue("id",id);
@@ -342,12 +342,12 @@ await using (var c=await Connect())
     await using var cmd=new NpgsqlCommand("""
     CREATE TABLE IF NOT EXISTS settings(key text PRIMARY KEY,value text NOT NULL);
     CREATE TABLE IF NOT EXISTS stores(id text PRIMARY KEY,name text NOT NULL,active boolean NOT NULL DEFAULT true);
-    INSERT INTO stores(id,name) VALUES('DEFAULT','Original Store') ON CONFLICT DO NOTHING;
+    INSERT INTO stores(id,name) SELECT 'DEFAULT','Original Store' WHERE NOT EXISTS(SELECT 1 FROM stores) ON CONFLICT DO NOTHING;
     CREATE TABLE IF NOT EXISTS employees(store_id text NOT NULL REFERENCES stores(id),id text NOT NULL,name text NOT NULL,active boolean NOT NULL DEFAULT true,PRIMARY KEY(store_id,id));
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS primary_store_id text;
     UPDATE employees SET primary_store_id=store_id WHERE primary_store_id IS NULL;
     CREATE TABLE IF NOT EXISTS employee_store_access(employee_id text NOT NULL,store_id text NOT NULL REFERENCES stores(id),PRIMARY KEY(employee_id,store_id));
-    INSERT INTO employees(store_id,id,name,primary_store_id) VALUES('DEFAULT','OWNER','Original Administrator','DEFAULT') ON CONFLICT DO NOTHING;
+    INSERT INTO employees(store_id,id,name,primary_store_id) SELECT id,'OWNER','Original Administrator',id FROM stores WHERE NOT EXISTS(SELECT 1 FROM employees WHERE id='OWNER') ORDER BY id LIMIT 1 ON CONFLICT DO NOTHING;
     INSERT INTO employee_store_access(employee_id,store_id) SELECT id,store_id FROM employees ON CONFLICT DO NOTHING;
     CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY,expires_at timestamptz NOT NULL);
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT';
