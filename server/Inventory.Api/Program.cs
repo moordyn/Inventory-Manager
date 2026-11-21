@@ -250,13 +250,16 @@ app.MapPost("/api/admin/stores",async (HttpContext ctx,StoreRequest req)=>{
     await tx.CommitAsync();return Results.Ok(new{created=true});
 });
 app.MapPut("/api/admin/stores/{id}/name",async (HttpContext ctx,string id,StoreNameRequest req)=>{
-    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.Forbid();
     var name=req.Name?.Trim();
     if(string.IsNullOrWhiteSpace(name)||name.Length>100)return Results.BadRequest("Location name must be 1–100 characters.");
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("UPDATE stores SET name=@name WHERE id=@id",c);
+    await using var tx=await c.BeginTransactionAsync();
+    await using var cmd=new NpgsqlCommand("UPDATE stores SET name=@name WHERE id=@id",c,tx);
     cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("name",name);
-    return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{updated=true}):Results.NotFound();
+    if(await cmd.ExecuteNonQueryAsync()!=1)return Results.NotFound();
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,id,"store.updated",id,"Store name changed");
+    await tx.CommitAsync();return Results.Ok(new{updated=true});
 });
 app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreRequest req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.globalAdmin)return Results.Forbid();
@@ -286,6 +289,10 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
             await using var move=new NpgsqlCommand($"UPDATE {table} SET store_id=@newId WHERE store_id=@oldId",c,tx);
             move.Parameters.AddWithValue("newId",newId);move.Parameters.AddWithValue("oldId",id);
             await move.ExecuteNonQueryAsync();
+        }
+        await using(var oldAudit=new NpgsqlCommand("UPDATE admin_audit SET store_id=@newId WHERE store_id=@oldId",c,tx)){
+            oldAudit.Parameters.AddWithValue("newId",newId);oldAudit.Parameters.AddWithValue("oldId",id);
+            await oldAudit.ExecuteNonQueryAsync();
         }
         await using(var primary=new NpgsqlCommand("UPDATE employees SET primary_store_id=@newId WHERE primary_store_id=@oldId",c,tx)){
             primary.Parameters.AddWithValue("newId",newId);primary.Parameters.AddWithValue("oldId",id);await primary.ExecuteNonQueryAsync();
