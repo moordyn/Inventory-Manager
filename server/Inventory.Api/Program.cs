@@ -342,7 +342,8 @@ record NewItem(string Sku,string Name,int Quantity,string? Barcode="",string? Ca
 record MovementRequest(int Delta,string? Note,Guid IdempotencyKey);
 record EditItem(string Sku,string Name,string? Barcode,string? Category,string? Description,int MinStock,decimal? UnitCost);
 
-record EmployeeLogin(string? EmployeeId);\nrecord SelectStore(string? StoreId);
+record EmployeeLogin(string? EmployeeId);
+record SelectStore(string? StoreId);
 record StoreRequest(string? Id,string? Name);
 record EmployeeRequest(string? StoreId,string? Id,string? Name);
 
