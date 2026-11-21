@@ -289,12 +289,11 @@ async Task<bool> CanManageStore(HttpContext ctx,string store){
 
 const string GoogleRedirect="https://inv.mrmschf.xyz/api/google/callback";
 const string GmailScope="https://www.googleapis.com/auth/gmail.send";
-var googleId=Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")??"";
-var googleSecret=Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET")??"";
+var googleCredentials=new GoogleOAuthCredentials(Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")??"",Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET")??"");
 var keyText=Environment.GetEnvironmentVariable("GOOGLE_TOKEN_KEY")??"";
 byte[]? googleKey=null;
 try{if(keyText.Length==64)googleKey=Convert.FromHexString(keyText);}catch(FormatException){}
-bool GoogleReady()=>googleId.Length>0&&googleSecret.Length>0&&googleKey is {Length:32};
+bool GoogleReady()=>googleCredentials.ClientId.Length>0&&googleCredentials.ClientSecret.Length>0&&googleKey is {Length:32};
 string EncryptToken(string value){
     if(googleKey is null)throw new InvalidOperationException("Token encryption not configured");
     var nonce=RandomNumberGenerator.GetBytes(12);var plain=Encoding.UTF8.GetBytes(value);var cipher=new byte[plain.Length];var tag=new byte[16];
@@ -323,7 +322,7 @@ async Task SendGmail(string store,string[] recipients,string subject,string body
         sender=reader.GetString(0);refresh=DecryptToken(reader.GetString(1));
     }
     using var tokens=await TokenRequest(new(){
-        ["client_id"]=googleId,["client_secret"]=googleSecret,["refresh_token"]=refresh,["grant_type"]="refresh_token"
+        ["client_id"]=googleCredentials.ClientId,["client_secret"]=googleCredentials.ClientSecret,["refresh_token"]=refresh,["grant_type"]="refresh_token"
     });
     var access=tokens.RootElement.GetProperty("access_token").GetString();
     var safeSubject=Convert.ToBase64String(Encoding.UTF8.GetBytes(subject.Replace("\r"," ").Replace("\n"," ")));
@@ -335,6 +334,81 @@ async Task SendGmail(string store,string[] recipients,string subject,string body
     using var response=await googleHttp.SendAsync(request);
     if(!response.IsSuccessStatusCode)throw new InvalidOperationException("Gmail API send failed: "+(int)response.StatusCode);
 }
+
+app.MapGet("/api/admin/google-oauth/config",async (HttpContext ctx)=>{
+    if((await Identity(ctx))?.globalAdmin!=true)return Results.Forbid();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT client_id,updated_at FROM google_oauth_config WHERE id=1",c);
+    await using var reader=await cmd.ExecuteReaderAsync();
+    if(await reader.ReadAsync()){
+        var clientId=reader.GetString(0);
+        var updatedAt=reader.GetDateTime(1);
+        return Results.Ok(new{configured=GoogleReady(),clientId,source="dashboard",updatedAt,encryptionReady=googleKey is {Length:32}});
+    }
+    return Results.Ok(new{configured=GoogleReady(),clientId=GoogleReady()?googleCredentials.ClientId:null,source=GoogleReady()?"server":"none",updatedAt=(DateTime?)null,encryptionReady=googleKey is {Length:32}});
+}).RequireRateLimiting("auth");
+
+app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthImportRequest req)=>{
+    var who=await Identity(ctx);
+    if(who is null)return Results.Unauthorized();
+    if(!who.Value.globalAdmin)return Results.Forbid();
+    if(googleKey is not {Length:32})return Results.BadRequest("The server encryption key is missing. Run the installer to configure GOOGLE_TOKEN_KEY first.");
+    if(req.Json is null||req.Json.Length>24_576||req.Json.Length==0)return Results.BadRequest("Choose a Google OAuth JSON file smaller than 24 KB.");
+    if(!PinValid(req.Pin))return Results.BadRequest("Enter the six-digit administrator PIN.");
+
+    await using var c=await Connect();
+    await using(var pinCmd=new NpgsqlCommand("SELECT value FROM settings WHERE key='pin'",c)){
+        var stored=(string?)await pinCmd.ExecuteScalarAsync();
+        var parts=stored?.Split(':');
+        if(parts is null||parts.Length!=2||!Equal(PinHash(req.Pin!,Convert.FromHexString(parts[0])),parts[1]))return Results.Unauthorized();
+    }
+
+    string clientId,clientSecret;
+    try{
+        using var parsed=JsonDocument.Parse(req.Json);
+        var root=parsed.RootElement;
+        if(root.ValueKind!=JsonValueKind.Object||!root.TryGetProperty("web",out var web)||web.ValueKind!=JsonValueKind.Object)
+            return Results.BadRequest("This must be a Google OAuth client JSON for a Web application.");
+        if(!web.TryGetProperty("client_id",out var idField)||idField.ValueKind!=JsonValueKind.String
+          ||!web.TryGetProperty("client_secret",out var secretField)||secretField.ValueKind!=JsonValueKind.String)
+            return Results.BadRequest("The Google JSON is missing its Client ID or Client Secret.");
+        clientId=idField.GetString()??"";
+        clientSecret=secretField.GetString()??"";
+        if(!Regex.IsMatch(clientId,@"^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$")
+          ||!Regex.IsMatch(clientSecret,@"^[A-Za-z0-9._~-]{10,256}$"))
+            return Results.BadRequest("The Google JSON contains invalid OAuth client credentials.");
+        if(!web.TryGetProperty("redirect_uris",out var redirects)||redirects.ValueKind!=JsonValueKind.Array
+          ||!redirects.EnumerateArray().Any(x=>x.ValueKind==JsonValueKind.String&&x.GetString()==GoogleRedirect))
+            return Results.BadRequest("Add https://inv.mrmschf.xyz/api/google/callback to the Google OAuth client's redirect URIs.");
+        if(!web.TryGetProperty("javascript_origins",out var origins)||origins.ValueKind!=JsonValueKind.Array
+          ||!origins.EnumerateArray().Any(x=>x.ValueKind==JsonValueKind.String&&x.GetString()=="https://inv.mrmschf.xyz"))
+            return Results.BadRequest("Add https://inv.mrmschf.xyz to the Google OAuth client's authorized JavaScript origins.");
+    }catch(JsonException){return Results.BadRequest("The selected file does not contain valid JSON.");}
+
+    // A different OAuth client cannot refresh tokens connected using the previous client.
+    if(GoogleReady()&&!string.Equals(googleCredentials.ClientId,clientId,StringComparison.Ordinal)){
+        await using var connected=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM google_store_accounts)",c);
+        if((bool)(await connected.ExecuteScalarAsync()??false))
+            return Results.Conflict("Existing stores have connected Google accounts. Disconnect those accounts before replacing this configuration with a different OAuth Client ID.");
+    }
+    await using(var save=new NpgsqlCommand("""
+        INSERT INTO google_oauth_config(id,client_id,encrypted_client_secret,configured_by)
+        VALUES(1,@id,@secret,@employee)
+        ON CONFLICT(id) DO UPDATE SET client_id=excluded.client_id,
+            encrypted_client_secret=excluded.encrypted_client_secret,
+            configured_by=excluded.configured_by,updated_at=now()
+        """,c)){
+        save.Parameters.AddWithValue("id",clientId);
+        save.Parameters.AddWithValue("secret",EncryptToken(clientSecret));
+        save.Parameters.AddWithValue("employee",who.Value.employee);
+        await save.ExecuteNonQueryAsync();
+    }
+    // Atomic reference swap activates imported credentials without restarting the API.
+    googleCredentials=new GoogleOAuthCredentials(clientId,clientSecret);
+    app.Logger.LogInformation("Global administrator {Admin} updated Google OAuth client configuration",who.Value.employee);
+    return Results.Ok(new{configured=true,clientId});
+}).RequireRateLimiting("auth");
+
 app.MapPost("/api/google/connect",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(!await CanManageStore(ctx,who.Value.store))return Results.Forbid();
@@ -346,7 +420,7 @@ app.MapPost("/api/google/connect",async (HttpContext ctx)=>{
     await using var cmd=new NpgsqlCommand("INSERT INTO google_oauth_states(state_hash,store_id,employee_id,verifier,expires_at) VALUES(@state,@store,@employee,@verifier,now()+interval '10 minutes')",c);
     cmd.Parameters.AddWithValue("state",Hash(state));cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("employee",who.Value.employee);cmd.Parameters.AddWithValue("verifier",verifier);
     await cmd.ExecuteNonQueryAsync();
-    var query=new Dictionary<string,string>{{"client_id",googleId},{"redirect_uri",GoogleRedirect},{"response_type","code"},{"scope","openid email "+GmailScope},{"access_type","offline"},{"prompt","consent"},{"state",state},{"code_challenge",challenge},{"code_challenge_method","S256"}};
+    var query=new Dictionary<string,string>{{"client_id",googleCredentials.ClientId},{"redirect_uri",GoogleRedirect},{"response_type","code"},{"scope","openid email "+GmailScope},{"access_type","offline"},{"prompt","consent"},{"state",state},{"code_challenge",challenge},{"code_challenge_method","S256"}};
     return Results.Ok(new{url="https://accounts.google.com/o/oauth2/v2/auth?"+string.Join("&",query.Select(x=>Uri.EscapeDataString(x.Key)+"="+Uri.EscapeDataString(x.Value)))});
 });
 app.MapGet("/api/google/callback",async (string? code,string? state,string? error)=>{
@@ -367,7 +441,7 @@ app.MapGet("/api/google/callback",async (string? code,string? state,string? erro
         role.Parameters.AddWithValue("employee",employee);role.Parameters.AddWithValue("store",store);
         if(!(bool)(await role.ExecuteScalarAsync()??false))return Results.Redirect(back+"unauthorized");
         using var token=await TokenRequest(new(){
-            ["client_id"]=googleId,["client_secret"]=googleSecret,["code"]=code,
+            ["client_id"]=googleCredentials.ClientId,["client_secret"]=googleCredentials.ClientSecret,["code"]=code,
             ["redirect_uri"]=GoogleRedirect,["grant_type"]="authorization_code",["code_verifier"]=verifier
         });
         var refresh=token.RootElement.TryGetProperty("refresh_token",out var rt)?rt.GetString():null;
@@ -617,6 +691,13 @@ await using (var c=await Connect())
     CREATE TABLE IF NOT EXISTS stores(id text PRIMARY KEY,name text NOT NULL,active boolean NOT NULL DEFAULT true);
     CREATE TABLE IF NOT EXISTS store_alert_settings(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,enabled boolean NOT NULL DEFAULT false,recipients text NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS google_store_accounts(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,email text NOT NULL,refresh_token text NOT NULL,connected_by text NOT NULL,connected_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE IF NOT EXISTS google_oauth_config(
+        id smallint PRIMARY KEY CHECK(id=1),
+        client_id text NOT NULL,
+        encrypted_client_secret text NOT NULL,
+        configured_by text NOT NULL,
+        updated_at timestamptz NOT NULL DEFAULT now()
+    );
     CREATE TABLE IF NOT EXISTS google_oauth_states(state_hash text PRIMARY KEY,store_id text NOT NULL REFERENCES stores(id) ON UPDATE CASCADE,employee_id text NOT NULL,verifier text NOT NULL,expires_at timestamptz NOT NULL);
     CREATE TABLE IF NOT EXISTS low_stock_state(item_id uuid PRIMARY KEY,store_id text NOT NULL,is_low boolean NOT NULL DEFAULT false,cycle bigint NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS alert_outbox(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,store_id text NOT NULL,item_id uuid NOT NULL,alert_cycle bigint NOT NULL DEFAULT 0,subject text NOT NULL,body text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),sent_at timestamptz,attempts integer NOT NULL DEFAULT 0,next_attempt timestamptz NOT NULL DEFAULT now());
@@ -658,6 +739,20 @@ await using (var c=await Connect())
     CREATE UNIQUE INDEX IF NOT EXISTS movements_idempotency_key_idx ON movements(idempotency_key) WHERE idempotency_key IS NOT NULL;
     """,c);
     await cmd.ExecuteNonQueryAsync();
+}
+await using(var configConnection=await Connect()){
+    await using var loadConfig=new NpgsqlCommand("SELECT client_id,encrypted_client_secret FROM google_oauth_config WHERE id=1",configConnection);
+    await using var stored=await loadConfig.ExecuteReaderAsync();
+    if(await stored.ReadAsync()){
+        try{
+            var clientId=stored.GetString(0);
+            var clientSecret=DecryptToken(stored.GetString(1));
+            googleCredentials=new GoogleOAuthCredentials(clientId,clientSecret);
+        }catch(Exception ex){
+            app.Logger.LogError(ex,"Cannot decrypt the saved Google OAuth configuration; check the persistent GOOGLE_TOKEN_KEY");
+            googleCredentials=new GoogleOAuthCredentials("","");
+        }
+    }
 }
 var mailCts=new CancellationTokenSource();
 app.Lifetime.ApplicationStopping.Register(()=>mailCts.Cancel());
@@ -710,3 +805,6 @@ record AlertSettingsRequest(bool Enabled,string? Recipients);
 record EmployeePermissions(bool GlobalAdmin,string[]? StoreAdminIds);
 
 record DeleteItemRequest(string? Confirmation);
+
+record GoogleOAuthCredentials(string ClientId,string ClientSecret);
+record GoogleOAuthImportRequest(string? Json,string? Pin);
