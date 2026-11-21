@@ -205,10 +205,11 @@ app.MapGet("/api/movements", async (HttpContext ctx) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c = await Connect();
-    await using var cmd = new NpgsqlCommand("SELECT m.id,i.sku,i.name,m.delta,m.before_qty,m.after_qty,m.created_at,m.note FROM movements m JOIN items i ON i.id=m.item_id ORDER BY m.id DESC LIMIT 200",c);
+    await using var cmd = new NpgsqlCommand("SELECT m.id,i.sku,i.name,m.delta,m.before_qty,m.after_qty,m.created_at,m.note,m.store_id,m.employee_id FROM movements m JOIN items i ON i.id=m.item_id WHERE m.store_id=@store ORDER BY m.id DESC LIMIT 200",c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r=await cmd.ExecuteReaderAsync();
     var list=new List<object>();
-    while(await r.ReadAsync()) list.Add(new{id=r.GetInt64(0),sku=r.GetString(1),name=r.GetString(2),delta=r.GetInt32(3),before=r.GetInt32(4),after=r.GetInt32(5),time=r.GetDateTime(6),note=r.IsDBNull(7)?null:r.GetString(7)});
+    while(await r.ReadAsync()) list.Add(new{id=r.GetInt64(0),sku=r.GetString(1),name=r.GetString(2),delta=r.GetInt32(3),before=r.GetInt32(4),after=r.GetInt32(5),time=r.GetDateTime(6),note=r.IsDBNull(7)?null:r.GetString(7),storeId=r.GetString(8),employeeId=r.GetString(9)});
     return Results.Ok(list);
 });
 
@@ -216,7 +217,8 @@ app.MapGet("/api/summary", async (HttpContext ctx) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT count(*),COALESCE(sum(quantity),0),count(*) FILTER(WHERE quantity<=min_stock),COALESCE(sum(quantity*unit_cost),0) FROM items",c);
+    await using var cmd=new NpgsqlCommand("SELECT count(*),COALESCE(sum(quantity),0),count(*) FILTER(WHERE quantity<=min_stock),COALESCE(sum(quantity*unit_cost),0) FROM items WHERE store_id=@store",c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r=await cmd.ExecuteReaderAsync();await r.ReadAsync();
     return Results.Ok(new{products=r.GetInt64(0),units=r.GetInt64(1),lowStock=r.GetInt64(2),value=r.GetDecimal(3)});
 });
@@ -224,8 +226,8 @@ app.MapGet("/api/items/lookup/{code}", async (HttpContext ctx, string code) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT id,sku,name,quantity FROM items WHERE sku=@code OR barcode=@code LIMIT 1",c);
-    cmd.Parameters.AddWithValue("code",code);
+    await using var cmd=new NpgsqlCommand("SELECT id,sku,name,quantity FROM items WHERE store_id=@store AND (sku=@code OR barcode=@code) LIMIT 1",c);
+    cmd.Parameters.AddWithValue("code",code);cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r=await cmd.ExecuteReaderAsync();
     return await r.ReadAsync()?Results.Ok(new{id=r.GetGuid(0),sku=r.GetString(1),name=r.GetString(2),quantity=r.GetInt32(3)}):Results.NotFound();
 });
@@ -234,8 +236,8 @@ app.MapPut("/api/items/{id:guid}", async (HttpContext ctx, Guid id, EditItem req
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(string.IsNullOrWhiteSpace(req.Name)||string.IsNullOrWhiteSpace(req.Sku)||req.MinStock<0||req.UnitCost<0)return Results.BadRequest("Invalid item details");
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("UPDATE items SET sku=@sku,name=@name,barcode=NULLIF(@barcode,''),category=@category,description=@description,min_stock=@min,unit_cost=@cost,updated_at=now() WHERE id=@id",c);
-    cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("sku",req.Sku.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
+    await using var cmd=new NpgsqlCommand("UPDATE items SET sku=@sku,name=@name,barcode=NULLIF(@barcode,''),category=@category,description=@description,min_stock=@min,unit_cost=@cost,updated_at=now() WHERE id=@id AND store_id=@store",c);
+    cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("sku",req.Sku.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
     cmd.Parameters.AddWithValue("barcode",(req.Barcode??"").Trim());cmd.Parameters.AddWithValue("category",(req.Category??"").Trim());cmd.Parameters.AddWithValue("description",(req.Description??"").Trim());
     cmd.Parameters.AddWithValue("min",req.MinStock);cmd.Parameters.AddWithValue("cost",(object?)req.UnitCost??DBNull.Value);
     return await cmd.ExecuteNonQueryAsync()==0?Results.NotFound():Results.Ok(new{updated=true});
