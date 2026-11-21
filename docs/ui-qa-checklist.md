@@ -17,6 +17,16 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] Silent 15-minute inactivity expiry signs out after genuine inactivity; normal interaction renews the session; background polling does not.
 - [ ] Changing store updates the location heading, products and permissions.
 
+### Employee display-name edits
+
+- [ ] Store admin sees Rename for themselves and ordinary employees assigned to their selected store, including secondary-store members.
+- [ ] Store admin cannot rename another store admin or global admin (both UI and API).
+- [ ] Store admin cannot rename an employee without access to the currently selected store (API rejects).
+- [ ] Global admin can rename ordinary employees, store admins, other global admins and themselves.
+- [ ] Blank, whitespace-only, over-100-character, and control-character names are rejected.
+- [ ] Renaming updates the displayed employee name without changing employee ID, login, store access, prior inventory attribution or sessions.
+- [ ] Audit history records display-name changes with actor, target and old/new names.
+
 ### Account changes and renamed owner
 
 - [ ] Settings → Account security allows employees to enter a new email twice and confirm their current password.
