@@ -96,17 +96,40 @@ app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
     return who is null?Results.Unauthorized():Results.Ok(new{storeId=who.Value.store,employeeId=who.Value.employee,isAdmin=who.Value.admin});
 });
 app.MapPost("/api/auth/employee-login",async (EmployeeLogin req)=>{
-    if(string.IsNullOrWhiteSpace(req.StoreId)||string.IsNullOrWhiteSpace(req.EmployeeId))return Results.Unauthorized();
+    if(string.IsNullOrWhiteSpace(req.EmployeeId))return Results.Unauthorized();
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees e JOIN stores s ON s.id=e.store_id WHERE e.store_id=@store AND e.id=@employee AND e.active AND s.active)",c);
-    cmd.Parameters.AddWithValue("store",req.StoreId.Trim());cmd.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
-    if(!(bool)(await cmd.ExecuteScalarAsync()??false))return Results.Unauthorized();
+    await using var cmd=new NpgsqlCommand("SELECT a.store_id FROM employee_store_access a JOIN employees e ON e.id=a.employee_id JOIN stores s ON s.id=a.store_id WHERE a.employee_id=@employee AND e.active AND s.active ORDER BY a.store_id LIMIT 1",c);
+    cmd.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
+    var store=(string?)await cmd.ExecuteScalarAsync();
+    if(store is null)return Results.Unauthorized();
     var token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     await using var insert=new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) VALUES(@hash,now()+interval '8 hours',@store,@employee,false)",c);
-    insert.Parameters.AddWithValue("hash",Hash(token));insert.Parameters.AddWithValue("store",req.StoreId.Trim());insert.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
+    insert.Parameters.AddWithValue("hash",Hash(token));insert.Parameters.AddWithValue("store",store);insert.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
     await insert.ExecuteNonQueryAsync();
     return Results.Ok(new{token});
 }).RequireRateLimiting("auth");
+app.MapGet("/api/auth/stores",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT s.id,s.name FROM stores s JOIN employee_store_access a ON a.store_id=s.id WHERE a.employee_id=@employee AND s.active ORDER BY s.name",c);
+    cmd.Parameters.AddWithValue("employee",who.Value.employee);
+    await using var r=await cmd.ExecuteReaderAsync();var stores=new List<object>();
+    while(await r.ReadAsync())stores.Add(new{id=r.GetString(0),name=r.GetString(1)});
+    return Results.Ok(stores);
+});
+app.MapPost("/api/auth/select-store",async (HttpContext ctx,SelectStore req)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(who.Value.admin)return Results.BadRequest("Administrator store switching is not supported.");
+    await using var c=await Connect();
+    await using(var check=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employee_store_access a JOIN stores s ON s.id=a.store_id WHERE a.employee_id=@employee AND a.store_id=@store AND s.active)",c)){
+        check.Parameters.AddWithValue("employee",who.Value.employee);check.Parameters.AddWithValue("store",req.StoreId??"");
+        if(!(bool)(await check.ExecuteScalarAsync()??false))return Results.Forbid();
+    }
+    var auth=ctx.Request.Headers.Authorization.ToString()[7..].Trim();
+    await using var cmd=new NpgsqlCommand("UPDATE sessions SET store_id=@store WHERE token_hash=@hash AND employee_id=@employee AND expires_at>now()",c);
+    cmd.Parameters.AddWithValue("store",req.StoreId!);cmd.Parameters.AddWithValue("hash",Hash(auth));cmd.Parameters.AddWithValue("employee",who.Value.employee);
+    return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{storeId=req.StoreId}):Results.Unauthorized();
+});
 app.MapGet("/api/admin/stores",async (HttpContext ctx)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
     await using var c=await Connect();
@@ -124,7 +147,7 @@ app.MapPost("/api/admin/stores",async (HttpContext ctx,StoreRequest req)=>{
 });
 app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
-    await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT store_id,id,name,active FROM employees ORDER BY store_id,id",c);
+    await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT primary_store_id,id,name,active FROM employees ORDER BY primary_store_id,id",c);
     await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
     while(await r.ReadAsync())list.Add(new{storeId=r.GetString(0),id=r.GetString(1),name=r.GetString(2),active=r.GetBoolean(3)});
     return Results.Ok(list);
@@ -132,11 +155,29 @@ app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
 app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
     if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.StoreId)||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid employee details");
-    await using var c=await Connect();await using var cmd=new NpgsqlCommand("INSERT INTO employees(store_id,id,name) VALUES(@store,@id,@name)",c);
+    await using var c=await Connect();await using var cmd=new NpgsqlCommand("INSERT INTO employees(primary_store_id,id,name) VALUES(@store,@id,@name)",c);
     cmd.Parameters.AddWithValue("store",req.StoreId.Trim());cmd.Parameters.AddWithValue("id",req.Id.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
-    await cmd.ExecuteNonQueryAsync();return Results.Ok(new{created=true});
+    await cmd.ExecuteNonQueryAsync();
+    await using var access=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id) VALUES(@employee,@store)",c);
+    access.Parameters.AddWithValue("employee",req.Id.Trim());access.Parameters.AddWithValue("store",req.StoreId.Trim());await access.ExecuteNonQueryAsync();
+    return Results.Ok(new{created=true});
 });
 
+app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,SelectStore req)=>{
+    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id) VALUES(@employee,@store) ON CONFLICT DO NOTHING",c);
+    cmd.Parameters.AddWithValue("employee",id);cmd.Parameters.AddWithValue("store",req.StoreId??"");
+    await cmd.ExecuteNonQueryAsync();return Results.Ok(new{assigned=true});
+});
+app.MapGet("/api/admin/employee-access",async (HttpContext ctx)=>{
+    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT employee_id,store_id FROM employee_store_access ORDER BY employee_id,store_id",c);
+    await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
+    while(await r.ReadAsync())list.Add(new{employeeId=r.GetString(0),storeId=r.GetString(1)});
+    return Results.Ok(list);
+});
 app.MapGet("/api/items", async (HttpContext ctx) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
@@ -250,7 +291,11 @@ await using (var c=await Connect())
     CREATE TABLE IF NOT EXISTS stores(id text PRIMARY KEY,name text NOT NULL,active boolean NOT NULL DEFAULT true);
     INSERT INTO stores(id,name) VALUES('DEFAULT','Original Store') ON CONFLICT DO NOTHING;
     CREATE TABLE IF NOT EXISTS employees(store_id text NOT NULL REFERENCES stores(id),id text NOT NULL,name text NOT NULL,active boolean NOT NULL DEFAULT true,PRIMARY KEY(store_id,id));
-    INSERT INTO employees(store_id,id,name) VALUES('DEFAULT','OWNER','Original Administrator') ON CONFLICT DO NOTHING;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS primary_store_id text;
+    UPDATE employees SET primary_store_id=store_id WHERE primary_store_id IS NULL;
+    CREATE TABLE IF NOT EXISTS employee_store_access(employee_id text NOT NULL,store_id text NOT NULL REFERENCES stores(id),PRIMARY KEY(employee_id,store_id));
+    INSERT INTO employees(store_id,id,name,primary_store_id) VALUES('DEFAULT','OWNER','Original Administrator','DEFAULT') ON CONFLICT DO NOTHING;
+    INSERT INTO employee_store_access(employee_id,store_id) SELECT id,store_id FROM employees ON CONFLICT DO NOTHING;
     CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY,expires_at timestamptz NOT NULL);
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT';
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS employee_id text NOT NULL DEFAULT 'OWNER';
@@ -282,6 +327,6 @@ record NewItem(string Sku,string Name,int Quantity,string? Barcode="",string? Ca
 record MovementRequest(int Delta,string? Note,Guid IdempotencyKey);
 record EditItem(string Sku,string Name,string? Barcode,string? Category,string? Description,int MinStock,decimal? UnitCost);
 
-record EmployeeLogin(string? StoreId,string? EmployeeId);
+record EmployeeLogin(string? EmployeeId);\nrecord SelectStore(string? StoreId);
 record StoreRequest(string? Id,string? Name);
 record EmployeeRequest(string? StoreId,string? Id,string? Name);
