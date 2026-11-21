@@ -47,24 +47,16 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] With Reduce Motion enabled, motion stops and a static ambient gradient remains.
 - [ ] Large inventories, tall history pages and mobile layouts do not create oversized canvases; scrolling stays responsive.
 
-## Interactive login fluid simulation and accessibility
+## Original sign-in aurora and accessibility
 
-- [ ] Run `node tests/login-fluid-browser.cjs` with Playwright Chromium and confirm the display shader compiles; verify pointer movement changes real rendered pixels.
-- [ ] Compare mouse-driven curls and soft smoke shadows against the Windhawk Fluid Wallpaper reference (fluid movement without clicking, coordinated theme colors).
-
-
-- [ ] Idle login background stays theme-colored without perpetual smoke generation. Normal mouse movement visibly displaces fluid; holding the mouse button intensifies it, without flooding the canvas.
-- [ ] Long repeated drags remain localized and fade rather than saturating the screen.
-- [ ] Fluid edges appear smooth on high-DPI phones/desktops; no blocky pixelation, including on Glacier Light.
-- [ ] Sidebar and mobile **Sign Out** buttons follow each active theme instead of a fixed brown warning color.
-
-
-- [ ] Sign-in, account setup, activation and password-reset views show a soft theme-color ambient animation behind the card.
-- [ ] Dragging the mouse injects real fluid displacement: colors curl, push surrounding clouds outward and slowly fade. Clicking and typing remain unaffected.
-- [ ] Background **base and fluid** colors change with the global login palette across all ten themes, including a pale background for Glacier Light (no forced black).
-- [ ] The animation stops on successful sign-in, resumes on logout, and pauses when the browser tab is hidden.
-- [ ] Enabling reduced-motion, or disabling WebGL2/float-render-target support, leaves a readable static theme-based background instead of a black/blank screen.
-- [ ] Test on desktop Chrome/Firefox and iOS Safari, including touch, resizing, keyboard-only login and battery/performance behavior.
+- [ ] Sign-in, first-time setup, account activation, and password reset show theme-matched drifting soft glows behind the login card.
+- [ ] Moving the mouse creates a short, soft colored trail that expands and fades; movement works without clicking or dragging.
+- [ ] Sidebar and mobile **Sign Out** buttons follow each active theme instead of fixed warning colors.
+- [ ] All ten global login themes update the glow colors, including a restrained effect on Glacier Light.
+- [ ] The animation does not block clicks, keyboard navigation, autofill, or login submissions.
+- [ ] The animation stops after sign-in, resumes on logout, and pauses when the tab is hidden.
+- [ ] Reduce Motion suppresses animation and keeps a readable theme-matched static background.
+- [ ] Test desktop browsers and iOS Safari, including touch, resizing, and performance.
 
 ## Mobile theme consistency
 
