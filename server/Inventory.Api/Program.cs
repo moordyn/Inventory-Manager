@@ -1554,6 +1554,7 @@ await using (var c=await Connect())
       store_id text NOT NULL REFERENCES stores(id),
       created_by text NOT NULL,
       assigned_to text,
+      request_key uuid,
       device text NOT NULL,
       repair_type text NOT NULL,
       customer_name text,
@@ -1567,6 +1568,8 @@ await using (var c=await Connect())
       updated_at timestamptz NOT NULL DEFAULT now(),
       closed_at timestamptz
     );
+    ALTER TABLE repair_tickets ADD COLUMN IF NOT EXISTS request_key uuid;
+    CREATE UNIQUE INDEX IF NOT EXISTS repair_tickets_request_key_idx ON repair_tickets(request_key) WHERE request_key IS NOT NULL;
     CREATE INDEX IF NOT EXISTS repair_tickets_store_queue_idx
       ON repair_tickets(store_id,created_at,id);
     CREATE TABLE IF NOT EXISTS repair_parts(
