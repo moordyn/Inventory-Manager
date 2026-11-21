@@ -440,9 +440,9 @@ app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthI
 
     // A different OAuth client cannot refresh tokens connected using the previous client.
     if(GoogleReady()&&!string.Equals(googleCredentials.ClientId,clientId,StringComparison.Ordinal)){
-        await using var connected=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM google_store_accounts)",c);
+        await using var connected=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM global_google_sender WHERE id=1)",c);
         if((bool)(await connected.ExecuteScalarAsync()??false))
-            return Results.Conflict("Existing stores have connected Google accounts. Disconnect those accounts before replacing this configuration with a different OAuth Client ID.");
+            return Results.Conflict("A global Gmail sender is connected. Disconnect the global sender before replacing this configuration with a different OAuth Client ID.");
     }
     await using(var save=new NpgsqlCommand("""
         INSERT INTO google_oauth_config(id,client_id,encrypted_client_secret,configured_by)
