@@ -49,5 +49,28 @@ jobs:
           if (html.includes('decodeFromConstraints({audio:false')) {
             throw new Error('Barcode scanner must reuse its first camera stream');
           }
-          console.log('Frontend syntax, responsive layout and barcode-scanner checks passed');
+          const assetBase = 'server/Inventory.Api/wwwroot/assets/';
+          const wordmark = fs.readFileSync(assetBase + 'zagg-wordmark.svg', 'utf8');
+          const favicon = fs.readFileSync(assetBase + 'zagg-favicon.svg', 'utf8');
+          if (!wordmark.includes('viewBox="0 0 900 358"') ||
+              !wordmark.includes('aria-label="ZAGG Inventory Manager"') ||
+              !wordmark.includes('fill="url(#m)"')) {
+            throw new Error('Approved ZAGG wordmark SVG is missing or malformed');
+          }
+          if (!favicon.includes('<svg') || !favicon.includes('viewBox="0 0 64 64"')) {
+            throw new Error('ZAGG favicon SVG is missing or malformed');
+          }
+          for (const brandLocation of ['brand-wordmark-login', 'brand-wordmark-sidebar', 'brand-wordmark-mobile']) {
+            if (!html.includes(brandLocation + '" src="/assets/zagg-wordmark.svg"')) {
+              throw new Error('ZAGG logo missing from ' + brandLocation);
+            }
+          }
+          if (!html.includes('<title>ZAGG Inventory Manager</title>') ||
+              !html.includes('href="/assets/zagg-favicon.svg"')) {
+            throw new Error('Browser tab title or icon is missing ZAGG branding');
+          }
+          if (html.includes('<div class="logo">▦</div> Inventory Manager')) {
+            throw new Error('Legacy Inventory Manager brand icon is still present');
+          }
+          console.log('Frontend syntax, responsive layout, barcode-scanner and brand asset checks passed');
           NODE
