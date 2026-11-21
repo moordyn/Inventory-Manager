@@ -299,6 +299,7 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
 @media(max-width:760px){.stat-num.stat-num-button{font-size:clamp(21px,6vw,28px)}}
 .product-history-panel{margin:16px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--input)}
 .product-history-panel h3{font-size:14px}
+#adminAuditList{max-height:540px;overflow-y:auto;scrollbar-width:thin}
 </style></head><body>
 <div id="auth" class="login-screen"><div class="card login-card"><div class="brand brand-login"><img class="brand-wordmark brand-wordmark-login" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async" fetchpriority="high"></div><div id="setup" class="hidden"><h1>Set up your inventory</h1><p>Enter the one-time installation token, then create a six-digit PIN.</p><form id="setupForm"><label for="setupToken">Installation token</label><input id="setupToken" required autocomplete="off"><label for="newPin">New PIN</label><input id="newPin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><label for="confirmPin">Confirm PIN</label><input id="confirmPin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><button class="btn primary">Create PIN</button></form></div><div id="employeeLogin" class="hidden"><h1>Employee sign in</h1><p>Enter your employee ID to access your assigned store.</p><form id="employeeForm"><label for="employeeId">Employee ID</label><input id="employeeId" required autocomplete="off"><button class="btn primary">Access inventory</button></form><p style="margin-top:20px"><button class="btn ghost" id="adminLoginBtn">Administrator access</button></p></div><div id="login" class="hidden"><h1>Welcome back</h1><p>Enter your six-digit PIN to access your inventory.</p><form id="loginForm"><label for="adminEmployeeId">Administrator Employee ID</label><input id="adminEmployeeId" autocomplete="off" placeholder="OWNER" value="OWNER" required><label for="pin">Access PIN</label><input id="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="off" autofocus><button class="btn primary">Unlock administration</button></form><p style="margin-top:18px"><button type="button" class="btn ghost" id="employeeLoginBtn">Employee login</button></p></div><div id="authLoading" class="muted" style="padding:12px 0" role="status">Connecting to the inventory server…</div><div id="authMsg" class="message" role="status" aria-live="polite"></div></div></div>
 <div id="app" class="shell hidden"><aside class="sidebar"><div class="brand brand-sidebar"><img class="brand-wordmark brand-wordmark-sidebar" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async"><div id="locationBrand" class="brand-location">Store location</div></div><nav class="nav" id="sideNav" aria-label="Main navigation"><button data-page="overview" class="active"><span>▦</span> Overview</button><button data-page="inventory"><span>▤</span> Inventory</button><button data-page="checkin"><span>↙</span> Check In</button><button data-page="checkout"><span>↗</span> Check Out</button><button data-page="history"><span>◷</span> History</button><button data-page="settings"><span>⚙</span> Settings</button><button data-page="administration" id="adminNav" class="hidden"><span>♙</span> Administration</button></nav><div class="sidebar-foot"><div style="color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">Signed in as</div><div id="signedInEmployee" style="font-size:15px;font-weight:700;color:#f0f2f5;overflow-wrap:anywhere;margin-top:4px">—</div><div id="signedInEmployeeId" style="margin-top:3px">—</div><button type="button" class="btn warn" id="sidebarLogoutBtn" style="width:100%;margin-top:12px">Sign out</button><div id="idleCountdown" style="margin-top:8px;font-size:11px" aria-live="off">Auto sign-out after 30s inactivity</div><div style="margin-top:16px">ZAGG Inventory Manager · Secure inventory access</div></div></aside>
@@ -880,11 +881,38 @@ $('sendTestAlert').onclick=async ()=>{
  catch(err){toast('Test failed: '+err.message,true)}
  finally{btn.disabled=false;btn.textContent='Send test email'}
 };
+const auditActionNames={
+ 'store.created':'Store created','store.updated':'Store updated','employee.created':'Employee created',
+ 'access.granted':'Store access granted','access.revoked':'Store access removed',
+ 'employee.permissions':'Permissions updated','alerts.updated':'Email alerts updated',
+ 'product.deleted':'Product deleted','oauth.configured':'Google OAuth configuration updated',
+ 'gmail.connected':'Global Gmail connected','gmail.disconnected':'Global Gmail disconnected'
+};
+async function loadAudit(){
+ if(!identity?.isAdmin)return;
+ const store=identity.storeId,global=identity.isGlobalAdmin,container=$('adminAuditList');
+ container.innerHTML='<div class="empty">Loading administrator activity…</div>';
+ try{
+  const entries=await api('admin/audit');
+  if(!identity||identity.storeId!==store||identity.isGlobalAdmin!==global)return;
+  container.innerHTML=entries.length?
+   '<div class="audit-entries">'+entries.map(entry=>{
+    const label=auditActionNames[entry.action]||entry.action;
+    const storeLabel=entry.storeId?'Store '+entry.storeId:'All stores';
+    return '<div class="audit-entry"><div class="audit-entry-main"><strong>'+esc(label)+'</strong><div class="muted" style="font-size:12px">Target: '+esc(entry.target)+'</div>'+
+      (entry.details?'<p>'+esc(entry.details)+'</p>':'')+
+      '</div><div class="audit-meta">'+esc(time(entry.time))+'<div>'+esc(entry.employeeId)+'</div><div>'+esc(storeLabel)+'</div></div></div>';
+   }).join('')+'</div>'
+   :'<div class="empty">No administrator changes recorded yet. New administrative actions will appear here.</div>';
+ }catch(err){if(container.isConnected)container.innerHTML='<div class="empty">Unable to load audit history: '+esc(err.message)+'</div>';}
+}
+$('refreshAuditBtn').onclick=loadAudit;
 async function loadAdmin(){
  if(!identity?.isAdmin)return;
  $('globalGoogleConfig').classList.toggle('hidden',!identity.isGlobalAdmin);
  if(identity.isGlobalAdmin)loadGlobalGoogleConfig();
  loadAlertSettings();
+ loadAudit();
  try{
   const [stores,employees,access]=await Promise.all([identity.isGlobalAdmin?api('admin/stores'):api('auth/stores'),api('admin/employees'),api('admin/employee-access')]);
   adminStores=stores;adminEmployees=employees;adminAccess=access;
