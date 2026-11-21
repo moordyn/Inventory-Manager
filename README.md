@@ -3,6 +3,8 @@
 Self-hosted barcode inventory application for Windows browsers, mobile browsers, and a planned packaged Windows/iOS client.
 
 ## Current web build
+- Consistent desktop/tablet/mobile design system: sticky sidebar, responsive KPI cards and record tables, compact mobile navigation, accessible dialogs and form labels
+- Fast camera barcode scanning: native BarcodeDetector when supported, prewarmed ZXing fallback on Safari, one camera stream, retail-format hints, flashlight support where available, and clean camera shutdown
 - Responsive charcoal dark dashboard with Overview, Inventory, Check In, Check Out, History, Settings
 - Search by SKU, name, category, or barcode; keyboard-emulating USB/Bluetooth scanners
 - Item creation/editing, categories, descriptions, costs, minimum-stock alerts
@@ -27,6 +29,9 @@ Nginx Proxy Manager forwards `https://inv.mrmschf.xyz` to `http://INVENTORY_LXC_
 - `server/Inventory.Api`: ASP.NET Core 10 API and web interface
 - `deploy`: Docker Compose, Ubuntu installer, PostgreSQL backup timer
 - `docs`: architecture and deployment notes
+
+## Visual and camera quality assurance
+See [docs/ui-qa-checklist.md](docs/ui-qa-checklist.md) for the full mobile, desktop, accessibility, barcode, administrator and production acceptance checklist. The UI and scanner static regression checks run in GitHub Actions, but real-device camera speed and production readiness must be validated on the deployed server.
 
 ## Remaining work
 The web app is an initial implementation, not a validated production release. GitHub Actions build verification, database migration tests, integration tests, robust concurrency/idempotency handling, restore tooling, camera-scanning fallback for iOS Safari, richer barcode formats, and packaged Tauri Windows / Capacitor iOS clients remain. Browser camera access requires HTTPS. A shared six-digit PIN is less secure than individual credentials; protect internet access with Cloudflare Access or another access control.
