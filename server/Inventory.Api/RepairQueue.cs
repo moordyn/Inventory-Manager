@@ -51,9 +51,9 @@ static class RepairQueueEndpoints
                        r.picked_up_at,r.picked_up_by
                 FROM repair_tickets r LEFT JOIN employees creator ON creator.id=r.created_by
                 WHERE r.store_id=@store
-                  AND (CASE WHEN @history THEN r.status IN ('completed','cancelled')
-                            ELSE r.status NOT IN ('completed','cancelled') END)
-                ORDER BY CASE WHEN @history THEN COALESCE(r.closed_at,r.updated_at) END DESC NULLS LAST,
+                  AND (CASE WHEN @history THEN r.status='cancelled' OR r.picked_up_at IS NOT NULL
+                            ELSE r.status<>'cancelled' AND r.picked_up_at IS NULL END)
+                ORDER BY CASE WHEN @history THEN COALESCE(r.picked_up_at,r.closed_at,r.updated_at) END DESC NULLS LAST,
                          CASE WHEN NOT @history THEN r.created_at END ASC,r.id ASC
                 LIMIT 500
                 """,c);
@@ -244,6 +244,16 @@ static class RepairQueueEndpoints
             await using var c=await connect();
             await using var tx=await c.BeginTransactionAsync();
             await LockKey(c,(NpgsqlTransaction)tx,req.IdempotencyKey);
+            // An idempotency UUID is global; reject reuse on a different ticket.
+            await using(var keyCheck=new NpgsqlCommand("""
+                SELECT id,store_id FROM repair_tickets WHERE pickup_request_key=@key
+                """,c,tx)){
+                keyCheck.Parameters.AddWithValue("key",req.IdempotencyKey);
+                await using var reader=await keyCheck.ExecuteReaderAsync();
+                if(await reader.ReadAsync() &&
+                    (reader.GetInt64(0)!=id || reader.GetString(1)!=who.Value.store))
+                    return Results.Conflict("This confirmation key was used for another repair.");
+            }
             // Locking the repair serializes pickup with status and inventory changes.
             string status;decimal quote,deposit;DateTime? priorPickup;Guid? priorKey;
             await using(var get=new NpgsqlCommand("""
