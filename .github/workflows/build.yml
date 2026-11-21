@@ -96,6 +96,15 @@ jobs:
               'loginAurora.stop()', 'loginAurora.start()']) {
             if (!html.includes(marker)) throw new Error('Original login aurora missing: '+marker);
           }
+          for (const marker of [
+              '#firstTimeSetupBtn,#forgotPasswordBtn',
+              '.mobile-account-actions .btn',
+              'color-mix(in srgb,var(--active) 75%,var(--panel))',
+              'bloom(x,y,c.radius,palette[c.tint],light?.19:.27)',
+              'c.r,colors[c.color],light?.37:.53'
+            ]) {
+            if (!html.includes(marker)) throw new Error('Theme-matched controls/stronger aurora missing: '+marker);
+          }
           if (!html.includes('#sidebarLogoutBtn,#mobileLogoutBtn') ||
               !html.includes('background:color-mix(in srgb,var(--accent) 13%,var(--raised))'))
             throw new Error('Sign-out buttons must follow the selected palette');
