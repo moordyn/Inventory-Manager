@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 ## Unreleased — next feature release
 
+- Fixed repair pickup availability: **Ready for Pickup** now exposes **Mark Paid / Picked Up** directly, without requiring the intermediate Completed status, while preserving balance settlement and idempotency safeguards.
+
 - Repair payments now use a single final **Mark Paid / Picked Up** action after completion instead of arbitrary additional payments. Completed repairs remain in queue awaiting pickup; the entire remaining balance and pickup are recorded atomically, once, with employee/time audit and existing-ticket migration.
 
 - Repair check-in now automatically assigns the employee checking in the device as its technician. Removed the technician selectors and reassignment API; existing tickets are aligned with their check-in employee on startup.
