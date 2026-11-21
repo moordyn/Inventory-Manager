@@ -788,7 +788,7 @@ $('removeStoreAccessBtn').onclick=async()=>{
  const employeeId=$('grantEmployee').value.trim(),storeId=$('grantStore').value.trim();
  const employee=adminEmployees.find(x=>x.id===employeeId),store=adminStores.find(x=>x.id===storeId);
  if(!employee||!store||employee.storeId===storeId||!adminAccess.some(x=>x.employeeId===employeeId&&x.storeId===storeId))return;
- if(!confirm('Remove '+employee.name+' ('+employeeId+') from '+store.name+' ('+storeId+')?\\n\\nThey will no longer be able to access this location. Their primary store and other locations will remain unchanged.'))return;
+ if(!confirm('Remove '+employee.name+' ('+employeeId+') from '+store.name+' ('+storeId+')?\n\nThey will no longer be able to access this location. Their primary store and other locations will remain unchanged.'))return;
  const button=$('removeStoreAccessBtn');
  button.disabled=true;
  try{
