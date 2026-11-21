@@ -871,16 +871,18 @@ app.MapPut("/api/movements/{id:long}/note",async (HttpContext ctx,long id,Checko
     if(req.ExpectedRevision!=revision)return Results.Conflict("This note was changed by someone else. Refresh the transaction before editing.");
     if(string.Equals(original?.Trim(),note,StringComparison.Ordinal))
         return Results.Ok(new{updated=false,note,noteRevision=revision});
+    DateTime? editedAt=null;
     await using(var update=new NpgsqlCommand("""
         UPDATE movements SET note=@note,note_revision=note_revision+1,
           note_updated_at=now(),note_updated_by=@editor
         WHERE id=@id AND store_id=@store AND delta<0
+        RETURNING note_updated_at
         """,c,tx)){
         update.Parameters.AddWithValue("note",note);
         update.Parameters.AddWithValue("editor",who.Value.employee);
         update.Parameters.AddWithValue("id",id);
         update.Parameters.AddWithValue("store",who.Value.store);
-        await update.ExecuteNonQueryAsync();
+        editedAt=(DateTime?)await update.ExecuteScalarAsync();
     }
     await using(var log=new NpgsqlCommand("""
         INSERT INTO movement_note_edits(movement_id,store_id,previous_note,new_note,changed_by,revision)
@@ -898,7 +900,7 @@ app.MapPut("/api/movements/{id:long}/note",async (HttpContext ctx,long id,Checko
         await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,who.Value.store,
             "movement.note_updated",id.ToString(),"Checkout note revised");
     await tx.CommitAsync();
-    return Results.Ok(new{updated=true,note,noteRevision=revision+1,noteUpdatedBy=who.Value.employee});
+    return Results.Ok(new{updated=true,note,noteRevision=revision+1,noteUpdatedBy=who.Value.employee,noteUpdatedAt=editedAt});
 });
 app.MapGet("/api/movements/{id:long}/note-edits",async (HttpContext ctx,long id)=>{
     var who=await Identity(ctx);
