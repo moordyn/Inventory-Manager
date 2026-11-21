@@ -18,7 +18,7 @@ if not isinstance(client_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]+\.apps\.g
     raise SystemExit("Invalid Google OAuth Client ID in JSON file")
 if not isinstance(client_secret, str) or not re.fullmatch(r"[A-Za-z0-9._~-]{10,256}", client_secret):
     raise SystemExit("Invalid Google OAuth Client Secret in JSON file")
-if "https://inv.mrmschf.xyz/api/google/callback" not in redirects:
+if "https://zagginventorymanager.com/api/google/callback" not in redirects:
     raise SystemExit("The Google OAuth redirect URI does not match this installation")
 lines = env_file.read_text(encoding="utf-8").splitlines()
 values = {"GOOGLE_CLIENT_ID": client_id, "GOOGLE_CLIENT_SECRET": client_secret}
