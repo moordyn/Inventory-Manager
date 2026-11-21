@@ -752,6 +752,7 @@ async Task SendMail(string[] recipients,string subject,string body){
 // Authentication email is independent of low-stock recipients: it goes only to the employee.
 // An integration-test outbox is enabled ONLY under the explicit IntegrationTest environment.
 async Task<bool> AccountMailReady(){
+    if(app.Environment.IsEnvironment("IntegrationTest")&&!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AUTH_EMAIL_TEST_OUTBOX")))return true;
     if(MailConfigured())return true;
     if(!GoogleReady())return false;
     await using var c=await Connect();
