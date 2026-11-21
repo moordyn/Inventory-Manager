@@ -134,46 +134,35 @@ async Task SignInSucceeded(HttpContext ctx,string kind){
     await cmd.ExecuteNonQueryAsync();
 }
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapGet("/api/auth/status", async () =>
-{
-    await using var c = await Connect();
-    await using var cmd = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM settings WHERE key='pin')", c);
-    return Results.Ok(new { initialized = (bool)(await cmd.ExecuteScalarAsync() ?? false) });
-});
-app.MapPost("/api/auth/setup", async (Setup request) =>
-{
-    if (!PinValid(request.Pin) || !PinValid(request.ConfirmPin) || request.Pin != request.ConfirmPin) return Results.BadRequest("PIN must be six matching digits.");
-    if (!Equal(Hash(request.SetupToken ?? ""), Hash(setupToken))) return Results.Unauthorized();
-    var salt = RandomNumberGenerator.GetBytes(32);
-    await using var c = await Connect();
-    await using var cmd = new NpgsqlCommand("INSERT INTO settings (key,value) VALUES ('pin',@v) ON CONFLICT DO NOTHING", c);
-    cmd.Parameters.AddWithValue("v", Convert.ToHexString(salt) + ":" + PinHash(request.Pin!, salt));
-    return await cmd.ExecuteNonQueryAsync() == 1 ? Results.Ok(new { created = true }) : Results.Conflict("PIN already configured.");
-}).RequireRateLimiting("sensitive");
-app.MapPost("/api/auth/login", async (HttpContext ctx,Login request) =>
-{
-    var locked=await CheckSignInLock(ctx,"admin");
-    if(locked is not null)return locked;
-    if(!PinValid(request.Pin))return await RejectedSignIn(ctx,"admin");
+// The installation token is a one-time bootstrap credential for the original OWNER.
+// No shared PIN remains accepted for login after the password-authentication migration.
+app.MapGet("/api/auth/status", async ()=>{
     await using var c=await Connect();
-    await using var cmd=new NpgsqlCommand("SELECT value FROM settings WHERE key='pin'",c);
-    var stored=(string?)await cmd.ExecuteScalarAsync();
-    if(stored is null)return Results.Conflict("Initial setup required.");
-    var parts=stored.Split(':');
-    if(parts.Length!=2||!Equal(PinHash(request.Pin!,Convert.FromHexString(parts[0])),parts[1]))
-        return await RejectedSignIn(ctx,"admin");
-    var employeeId=string.IsNullOrWhiteSpace(request.EmployeeId)?"OWNER":request.EmployeeId.Trim();
-    await using(var check=new NpgsqlCommand("SELECT count(*) FROM employees WHERE id=@employee AND active AND global_admin",c)){
-        check.Parameters.AddWithValue("employee",employeeId);
-        if((long)(await check.ExecuteScalarAsync()??0L)!=1)return await RejectedSignIn(ctx,"admin");
-    }
-    var token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-    await using var insert=new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) SELECT @h,now()+interval '8 hours',e.primary_store_id,e.id,true FROM employees e WHERE e.id=@employee AND e.global_admin AND e.active LIMIT 1",c);
-    insert.Parameters.AddWithValue("h",Hash(token));insert.Parameters.AddWithValue("employee",employeeId);
-    if(await insert.ExecuteNonQueryAsync()!=1)return await RejectedSignIn(ctx,"admin");
-    await SignInSucceeded(ctx,"admin");
-    return Results.Ok(new{token});
+    await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id='OWNER' AND active AND global_admin AND password_hash IS NOT NULL)",c);
+    return Results.Ok(new{initialized=(bool)(await cmd.ExecuteScalarAsync()??false),loginMethod="password"});
 });
+app.MapPost("/api/auth/setup",async (Setup request)=>{
+    if(!Equal(Hash(request.SetupToken??""),Hash(setupToken)))return Results.Unauthorized();
+    if(!EmailPairValid(request.Email,request.ConfirmEmail))return Results.BadRequest("Enter your email address twice; both entries must match.");
+    if(!PasswordValid(request.Password)||request.Password!=request.ConfirmPassword)
+        return Results.BadRequest("Passwords must match and contain at least 8 characters, uppercase, lowercase, a number and a symbol.");
+    var email=request.Email!.Trim().ToLowerInvariant();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("""
+        UPDATE employees SET email=@email,password_hash=@hash,password_updated_at=now(),
+            bootstrap_provisional=true
+        WHERE id='OWNER' AND active AND global_admin AND password_hash IS NULL
+        """,c);
+    cmd.Parameters.AddWithValue("email",email);
+    cmd.Parameters.AddWithValue("hash",PasswordHash(request.Password!));
+    try{
+        return await cmd.ExecuteNonQueryAsync()==1
+            ?Results.Ok(new{created=true,emailVerificationPending=true})
+            :Results.Conflict("Initial administrator already configured.");
+    }catch(PostgresException ex)when(ex.SqlState=="23505"){return Results.Conflict("This email address is already in use.");}
+}).RequireRateLimiting("sensitive");
+// Retired endpoint: fail closed; accepting the old PIN would bypass per-user passwords.
+app.MapPost("/api/auth/login",()=>Results.StatusCode(StatusCodes.Status410Gone));
 app.MapPost("/api/auth/logout", async (HttpContext ctx) =>
 {
     if (!await Authed(ctx)) return Results.Unauthorized();
