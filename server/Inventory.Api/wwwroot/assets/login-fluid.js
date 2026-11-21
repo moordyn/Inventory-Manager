@@ -145,7 +145,7 @@
   function create(canvas,root) {
     const reduce=window.matchMedia('(prefers-reduced-motion: reduce)');
     const gl=canvas.getContext('webgl2',{alpha:true,premultipliedAlpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:false,powerPreference:'low-power'});
-    let ready=false,active=false,raf=0,last=0,width=0,height=0,simW=0,simH=0,dyeW=0,dyeH=0,colors=[],pointer=null,queue=[],step=0,gestureInk=0,lastSample=0;
+    let ready=false,active=false,raf=0,last=0,width=0,height=0,simW=0,simH=0,dyeW=0,dyeH=0,colors=[],pointer=null,queue=[],step=0,inkBudget=1.05,lastBudget=0,lastSample=0;
     let targets=null,programs=null;
     function theme(){
       const css=getComputedStyle(document.body);
@@ -277,41 +277,53 @@
       targets.dye.swap();
     }
 
+    // Pointer motion and dragging both stir the dye. The regenerating budget
+    // caps total ink per second, so a long movement cannot cover the screen.
     function motion(event){
       if(!active||reduce.matches||!targets)return;
-      // Only a deliberate drag paints dye. Ordinary mouse movement doesn't flood the page.
-      const dragging=event.pointerType==='mouse'?(event.buttons&1)!==0:
-                     (event.pointerType==='pen'?(event.buttons&1)!==0:pointer?.id===event.pointerId);
-      if(!dragging){pointer=null;return;}
       const bounds=root.getBoundingClientRect();
       if(!bounds.width||!bounds.height)return;
       const next={x:Math.max(0,Math.min(1,(event.clientX-bounds.left)/bounds.width)),
                   y:Math.max(0,Math.min(1,1-(event.clientY-bounds.top)/bounds.height)),id:event.pointerId};
-      if(!pointer||pointer.id!==next.id){pointer=next;gestureInk=0;lastSample=0;return;}
+      if(!pointer||pointer.id!==next.id){
+        pointer=next;
+        return;
+      }
       const dx=next.x-pointer.x,dy=next.y-pointer.y;
+      pointer=next;
       const dist=Math.hypot(dx*width,dy*height);
       const now=performance.now();
-      if(dist<7||now-lastSample<24){return;}
-      // Cap ink per gesture and splats per frame: no full-screen saturation on long drags.
-      const amount=Math.min(dist,70);
-      if(gestureInk>=1.8){pointer=next;return;}
-      const fraction=Math.min(.15,amount/380,1.8-gestureInk);
-      gestureInk+=fraction;lastSample=now;
-      const strength=Math.min(1.3,dist/80);
-      queue.push({x:next.x,y:next.y,
-                  vx:Math.max(-.65,Math.min(.65,dx*5))*strength,
-                  vy:Math.max(-.65,Math.min(.65,dy*5))*strength,
-                  color:colors[(Math.floor(gestureInk*8)+step)%colors.length].map(v=>v*fraction)});
-      if(queue.length>8)queue.shift();
-      pointer=next;
+      if(dist<5||now-lastSample<25)return;
+      lastSample=now;
+      const dragging=(event.pointerType==='mouse'||event.pointerType==='pen')
+        ? (event.buttons&1)!==0 : true;
+      // Continuous, bounded budget refills even during a single long drag.
+      if(!lastBudget)lastBudget=now;
+      inkBudget=Math.min(1.05,inkBudget+(now-lastBudget)*.00042);
+      lastBudget=now;
+      const desired=Math.min(dragging?.19:.11,dist/(dragging?340:630));
+      const amount=Math.min(desired,inkBudget);
+      if(amount<.008)return;
+      inkBudget-=amount;
+      const velocity=dragging?7.0:4.5;
+      queue.push({
+        x:next.x,y:next.y,
+        vx:Math.max(-.9,Math.min(.9,dx*velocity)),
+        vy:Math.max(-.9,Math.min(.9,dy*velocity)),
+        color:colors[step%colors.length].map(v=>v*amount*(dragging?1.5:1.25)),
+        radius:dragging?.035:.028
+      });
+      if(queue.length>12)queue.shift();
     }
     function beginDrag(event){
       if(event.pointerType==='mouse'&&event.button!==0)return;
+      // Allow the first move to measure displacement from pointer-down.
       const bounds=root.getBoundingClientRect();
-      pointer={id:event.pointerId,x:(event.clientX-bounds.left)/bounds.width,y:1-(event.clientY-bounds.top)/bounds.height};
-      gestureInk=0;lastSample=0;
+      if(!bounds.width||!bounds.height)return;
+      pointer={id:event.pointerId,x:(event.clientX-bounds.left)/bounds.width,
+        y:1-(event.clientY-bounds.top)/bounds.height};
     }
-    function forget(event){if(!event || !pointer || event.pointerId===pointer.id)pointer=null;}
+    function forget(event){if(!event||!pointer||event.pointerId===pointer.id)pointer=null;}
     function simulate(now){
       if(!active)return;
       raf=requestAnimationFrame(simulate);
@@ -329,7 +341,7 @@
       dye.swap();
       for(let i=0;i<Math.min(queue.length,3);i++){
         const q=queue.shift();
-        splat(q.x,q.y,q.vx,q.vy,q.color,.028);
+        splat(q.x,q.y,q.vx,q.vy,q.color,q.radius);
       }
       // No periodic dye injection: the fluid settles instead of taking over the page.
       pass('curl',targets.curl,{velocity:vel.a},{stepSize:texel});
@@ -345,7 +357,7 @@
       pass('display',null,{dye:dye.a},{sourceSize:[dyeW,dyeH],lightMode:document.body.dataset.theme==='glacier'?1:0});
     }
     function stop(){
-      active=false;cancelAnimationFrame(raf);raf=0;last=0;pointer=null;queue=[];gestureInk=0;
+      active=false;cancelAnimationFrame(raf);raf=0;last=0;pointer=null;queue=[];inkBudget=1.05;lastBudget=0;lastSample=0;
     }
     function start(){
       stop();theme();
