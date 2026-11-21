@@ -102,9 +102,17 @@ assert.ok(audit.some(x=>x.action==='access.granted'&&x.target==='TESTUSER'));
 assert.ok(audit.some(x=>x.employeeId==='OWNER'));
 
 const employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER'},expect:200})).body.token;
-// An ordinary employee may edit their own checkout, not a different employee's.
-await call('movements/'+ownerCheckoutId+'/note',{token:employeeToken,method:'PUT',
- body:{note:'Unapproved change',expectedRevision:1},expect:403});
+// Any employee with access to the store can add context to a coworker's checkout.
+const coworkerEdit=await call('movements/'+ownerCheckoutId+'/note',{token:employeeToken,method:'PUT',
+ body:{note:'Damaged during repair; display damage confirmed',expectedRevision:1},expect:200});
+assert.equal(coworkerEdit.body.noteRevision,2);
+assert.equal(coworkerEdit.body.noteUpdatedBy,'TESTUSER');
+const coworkerNoteEdits=(await call('movements/'+ownerCheckoutId+'/note-edits',{token:employeeToken})).body;
+assert.equal(coworkerNoteEdits.length,2);
+assert.equal(coworkerNoteEdits[0].employeeId,'TESTUSER');
+assert.equal(coworkerNoteEdits[1].employeeId,'OWNER');
+await call('movements/'+ownerCheckoutId+'/note',{token:admin,method:'PUT',
+ body:{note:'Manager overwrote outdated version',expectedRevision:1},expect:409});
 const employeeCheckout=await call('items/'+id+'/movements',{token:employeeToken,method:'POST',
  body:{delta:-1,note:'Used for display repair',idempotencyKey:randomUUID()},expect:200});
 assert.equal(employeeCheckout.body.after,7);
