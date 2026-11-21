@@ -7,8 +7,8 @@ For installation, operations, cloud integrations, security cautions and recovery
 - **UI and API:** ASP.NET Core 10 web application serving the responsive browser UI and JSON endpoints from the same API container.
 - **Database:** PostgreSQL 17, running as the internal Docker Compose service `db` with persistent named volume `inventory_data`. The current Compose mapping exposes the API on host TCP/18424 and does not publish PostgreSQL on the host.
 - **Deployment:** Ubuntu 24.04 LXC on Proxmox, `deploy/install.sh`, Docker Compose at `deploy/compose.yml`.
-- **Public domain:** `https://zagginventorymanager.com`, reached through Cloudflare DNS/DDNS, OPNsense WAN NAT, and Nginx Proxy Manager, which forwards HTTPS web traffic over LAN HTTP to the API's port 18424.
-- **Google OAuth 2.0 callback:** `https://zagginventorymanager.com/api/google/callback`. The public origin and callback are currently hardcoded in `server/Inventory.Api/Program.cs`.
+- **Public domain:** **installer-supplied** `PUBLIC_ORIGIN`, e.g. `https://inventory.example.com` (placeholder only), reached through the chosen DNS, firewall/tunnel and HTTPS reverse proxy to the app's host port 18424. Cloudflare + OPNsense + Nginx Proxy Manager are supported documented examples, not requirements.
+- **Google OAuth 2.0 callback:** `PUBLIC_ORIGIN + /api/google/callback`. `server/Inventory.Api/Program.cs` validates the configured external HTTPS origin and uses it for OAuth requests and JSON import validation; do not infer the domain from untrusted Host headers. Each customer creates their own Google Cloud Web OAuth client.
 - **Email alerts:** One global Gmail API sender for all stores; per-store recipient lists and alert toggles. SMTP configuration is an optional alternate sender.
 - **Backup:** Compressed `pg_dump` to `/var/backups/inventory-manager` at 03:15 local host time by systemd timer, with roughly 14-day local retention. An offsite copy and a tested restore are still operational requirements.
 
