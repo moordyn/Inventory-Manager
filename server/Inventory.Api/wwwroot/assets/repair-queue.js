@@ -56,7 +56,8 @@ function overviewRender(data){
   '<h3>'+safe(r.device)+' · '+safe(r.repairType)+'</h3>'+
   '<small>'+safe(displayStatus(r))+' · '+safe(r.createdByName||r.createdBy)+'</small></div>'+
   '<div class="overview-repair-entry-money"><strong>'+usd(r.balanceDue)+' due</strong>'+
-  '<small>'+usd(r.quotedTotal)+' quoted · '+usd(r.paidUpfront)+' upfront</small></div></div>'
+  '<small>'+usd(r.quotedTotal)+' quoted · '+usd(r.paidUpfront)+' upfront</small>'+
+  '<button type="button" class="btn" data-overview-repair="'+Number(r.id)+'" aria-label="Open repair '+Number(r.id)+'">Open ticket</button></div></div>'
  ).join(''):'<div class="empty">No repairs in the active queue.</div>';
 }
 async function refreshOverview(){
@@ -231,6 +232,13 @@ const modalRoot=$r('modalRoot');
 if(modalRoot)new MutationObserver(()=>{
  if(cameraTicketId!==null&&!modalRoot.querySelector('.scanner-preview'))cameraTicketId=null;
 }).observe(modalRoot,{childList:true});
+$r('overviewRepairTickets').onclick=event=>{
+ const button=event.target.closest('[data-overview-repair]');
+ if(!button)return;
+ const ticketId=Number(button.dataset.overviewRepair);
+ navigate('repairs');
+ void openTicket(ticketId);
+};
 $r('repairNewBtn').onclick=()=>void createTicket();
 $r('repairSearch').oninput=renderList;
 $r('repairShowHistory').onchange=()=>{historical=$r('repairShowHistory').checked;rows=[];renderList();void refresh()};
