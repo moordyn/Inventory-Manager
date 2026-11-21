@@ -6,11 +6,11 @@ The **Repair Queue** page tracks device repairs separately from inventory receiv
 
 Sign in to the appropriate store, open **Repair Queue → Check in repair**, and enter the device and repair type. The total quoted amount and the amount already paid upfront are required, even if zero. Customer name, contact, serial/IMEI, and notes are optional. The employee who checks in the device is automatically assigned as its technician; there is no manual technician selector or reassignment action. The application automatically records the current store, employee ID and time.
 
-All money fields are recorded values only: **this application does not charge, refund or authorize payments**. The initial deposit is captured as a recorded amount at check-in. After repair work is marked **Completed**, a single **Mark Paid / Picked Up** action records receipt of the entire remaining balance and the physical pickup together. The button is not available until completion. The balance is \`quoted_total - paid_upfront - sum(recorded final/legacy payments)\`. This action is idempotent: retries never record another payment or pickup. If the deposit already covers the quote, pickup records $0 and still closes the ticket. No payment provider, tax calculation or invoicing is introduced.
+All money fields are recorded values only: **this application does not charge, refund or authorize payments**. The initial deposit is captured as a recorded amount at check-in. Once repair work is marked **Ready for Pickup** or **Completed**, a single **Mark Paid / Picked Up** action records receipt of the entire remaining balance and the physical pickup together. The button becomes available at either status; going through Completed is not required. The balance is \`quoted_total - paid_upfront - sum(recorded final/legacy payments)\`. This action is idempotent: retries never record another payment or pickup. If the deposit already covers the quote, pickup records $0 and still closes the ticket. No payment provider, tax calculation or invoicing is introduced.
 
 ## Status and order
 
-Active statuses are **Checked In**, **In Progress**, **Waiting for Parts**, **Ready for Pickup**, and **Completed (Awaiting Pickup)**. Completed tickets remain in the active queue until the final balance is recorded and the device is picked up. **Mark Paid / Picked Up** moves the completed ticket into history, alongside cancelled tickets. A picked-up ticket cannot be reopened or reassigned to another status. All changes record the employee and timestamp in the ticket's activity timeline.
+Active statuses are **Checked In**, **In Progress**, **Waiting for Parts**, **Ready for Pickup**, and **Completed (Awaiting Pickup)**. Ready for Pickup and Completed tickets remain in the active queue until the final balance is recorded and the device is picked up. **Mark Paid / Picked Up** moves the completed ticket into history, alongside cancelled tickets. A picked-up ticket cannot be reopened or reassigned to another status. All changes record the employee and timestamp in the ticket's activity timeline.
 
 Active tickets are sorted ascending by check-in timestamp and ticket ID, not the latest update time. Each location sees only its own tickets. The global/store administrator permission model and the existing session authorization apply.
 
@@ -43,7 +43,7 @@ The server adds \`repair_tickets\`, \`repair_parts\`, \`repair_payments\`, and \
 | \`GET /api/repairs/{id}\` | One ticket with parts, payments and audit timeline |
 | \`POST /api/repairs\` | Check in a repair, with an idempotency key |
 | \`PUT /api/repairs/{id}/status\` | Update status |
-| \`POST /api/repairs/{id}/pickup\` | After completion, record the entire remaining balance and customer pickup, idempotently |
+| \`POST /api/repairs/{id}/pickup\` | From Ready for Pickup or Completed, record the entire remaining balance and customer pickup, idempotently |
 | \`POST /api/repairs/{id}/parts\` | Consume inventory part and link movement, idempotently |
 | \`POST /api/repairs/{id}/parts/{partId}/return\` | Return unused part quantity to stock, idempotently |
 
@@ -56,7 +56,7 @@ Users are authenticated via the existing bearer session and cannot inspect or ch
 - Scan at least two different parts; confirm their product quantities decrease and history contains both linked checkout events.
 - Repeat the exact same scan request UUID; verify no second deduction. Attempt stock use beyond availability; verify no repair entry or stock movement was saved.
 - Return a part, repeat the return, and verify inventory increases exactly once.
-- Mark a repair completed and verify it stays in the active queue awaiting pickup. Confirm **Mark Paid / Picked Up**, ensure the entire balance is recorded once, then verify it moves to history and cannot be reopened.
+- Mark one repair Ready for Pickup (skipping Completed) and another Completed; verify both stay in the active queue with the final pickup action. Confirm **Mark Paid / Picked Up**, ensure the entire balance is recorded once, then verify it moves to history and cannot be reopened.
 - Switch stores and confirm no ticket leakage. Verify a non-administrator employee can check in and update their own store's tickets.
 - Test desktop and mobile browsers, barcode camera permissions, focus/keyboard access, theme colors and reduced-motion behavior.
 
