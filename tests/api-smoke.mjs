@@ -59,6 +59,36 @@ movements=(await call('items/'+id+'/history',{token:admin})).body;
 assert.equal(movements.length,3,'Idempotent retries cannot duplicate movement history');
 assert.equal(movements[0].delta,-1);
 assert.equal(movements[0].employeeId,'OWNER');
+// A checkout can receive a follow-up note without a new stock movement.
+const ownerCheckoutId=movements[0].id;
+assert.equal(movements[0].noteRevision,0);
+const savedNote=await call('movements/'+ownerCheckoutId+'/note',{token:admin,method:'PUT',
+ body:{note:'Damaged during repair',expectedRevision:0},expect:200});
+assert.equal(savedNote.body.note,'Damaged during repair');
+assert.equal(savedNote.body.noteRevision,1);
+assert.equal(savedNote.body.noteUpdatedBy,'OWNER');
+assert.ok(savedNote.body.noteUpdatedAt);
+movements=(await call('items/'+id+'/history',{token:admin})).body;
+assert.equal(movements.length,3,'Note edits do not create an extra movement');
+assert.equal(movements[0].delta,-1,'Note edits do not alter the stock delta');
+assert.equal(movements[0].after,8,'Note edits do not alter stock balance');
+assert.equal(movements[0].note,'Damaged during repair');
+assert.equal(movements[0].noteRevision,1);
+const noteHistory=(await call('movements/'+ownerCheckoutId+'/note-edits',{token:admin})).body;
+assert.equal(noteHistory.length,1);
+assert.equal(noteHistory[0].previousNote,'Retail sale');
+assert.equal(noteHistory[0].note,'Damaged during repair');
+await call('movements/'+ownerCheckoutId+'/note',{token:admin,method:'PUT',
+ body:{note:'Outdated overwrite',expectedRevision:0},expect:409});
+await call('movements/'+ownerCheckoutId+'/note',{token:admin,method:'PUT',
+ body:{note:'   ',expectedRevision:1},expect:400});
+await call('movements/'+ownerCheckoutId+'/note',{token:admin,method:'PUT',
+ body:{note:'x'.repeat(1001),expectedRevision:1},expect:400});
+await call('movements/'+ownerCheckoutId+'/note',{method:'PUT',
+ body:{note:'Unauthorized',expectedRevision:1},expect:401});
+await call('movements/'+movements[2].id+'/note',{token:admin,method:'PUT',
+ body:{note:'Cannot edit check-in',expectedRevision:0},expect:404});
+assert.equal((await call('movements',{token:admin})).body.find(x=>x.id===ownerCheckoutId).note,'Damaged during repair');
 low=(await call('items/reorder',{token:admin})).body;
 assert.equal(low.length,0,'Restocked item leaves reorder list');
 
@@ -72,11 +102,29 @@ assert.ok(audit.some(x=>x.action==='access.granted'&&x.target==='TESTUSER'));
 assert.ok(audit.some(x=>x.employeeId==='OWNER'));
 
 const employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'TESTUSER'},expect:200})).body.token;
+// An ordinary employee may edit their own checkout, not a different employee's.
+await call('movements/'+ownerCheckoutId+'/note',{token:employeeToken,method:'PUT',
+ body:{note:'Unapproved change',expectedRevision:1},expect:403});
+const employeeCheckout=await call('items/'+id+'/movements',{token:employeeToken,method:'POST',
+ body:{delta:-1,note:'Used for display repair',idempotencyKey:randomUUID()},expect:200});
+assert.equal(employeeCheckout.body.after,7);
+const newMovements=(await call('items/'+id+'/history',{token:admin})).body;
+const employeeCheckoutId=newMovements[0].id;
+assert.equal(newMovements[0].employeeId,'TESTUSER');
+await call('movements/'+employeeCheckoutId+'/note',{token:employeeToken,method:'PUT',
+ body:{note:'Damaged during 14 Pro Max repair',expectedRevision:0},expect:200});
+await call('movements/'+employeeCheckoutId+'/note',{token:admin,method:'PUT',
+ body:{note:'Damaged during 14 Pro Max repair; manager reviewed',expectedRevision:1},expect:200});
+assert.equal((await call('movements/'+employeeCheckoutId+'/note-edits',{token:employeeToken})).body.length,2);
+
 await call('admin/audit',{token:employeeToken,expect:403});
 await call('auth/select-store',{token:employeeToken,method:'POST',body:{storeId:'BRANCH2'},expect:200});
 const otherCsv=await call('items/export',{token:employeeToken});
 assert.ok(!otherCsv.body.includes('Test charging kit'),'CSV must only include current store');
 await call('items/'+id+'/history',{token:employeeToken,expect:404});
+await call('movements/'+ownerCheckoutId+'/note-edits',{token:employeeToken,expect:404});
+await call('movements/'+employeeCheckoutId+'/note',{token:employeeToken,method:'PUT',
+ body:{note:'Cross-store edit blocked',expectedRevision:2},expect:404});
 
 await call('admin/employees/TESTUSER/stores/DEFAULT',{token:admin,method:'DELETE',expect:400});
 await call('admin/employees/TESTUSER/stores/BRANCH2',{token:admin,method:'DELETE',expect:200});
@@ -95,4 +143,4 @@ await call('items/'+id+'/delete',{token:admin,method:'POST',body:{confirmation:'
 audit=(await call('admin/audit',{token:admin})).body;
 assert.ok(audit.some(x=>x.action==='product.deleted'&&x.target===id));
 assert.ok(!(await call('items/export',{token:admin})).body.includes('Test charging kit'));
-console.log('API smoke tests passed: CSV, reorder, product history, idempotency, audit, scopes and deletion.');
+console.log('API smoke tests passed: CSV, reorder, checkout note revisions, note permissions, product history, idempotency, audit, scopes and deletion.');
