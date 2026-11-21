@@ -4,7 +4,7 @@ The **Repair Queue** page tracks device repairs separately from inventory receiv
 
 ## Check in a repair
 
-Sign in to the appropriate store, open **Repair Queue → Check in repair**, and enter the device and repair type. The total quoted amount and the amount already paid upfront are required, even if zero. Customer name, contact, serial/IMEI, notes and assigned technician are optional. The application automatically records the current store, employee ID and time.
+Sign in to the appropriate store, open **Repair Queue → Check in repair**, and enter the device and repair type. The total quoted amount and the amount already paid upfront are required, even if zero. Customer name, contact, serial/IMEI, and notes are optional. The employee who checks in the device is automatically assigned as its technician; there is no manual technician selector or reassignment action. The application automatically records the current store, employee ID and time.
 
 All money fields are recorded values only: **this application does not charge, refund or authorize payments**. Additional payment entries can be recorded later, up to the remaining quoted balance. The balance is calculated as \`quoted_total - paid_upfront - sum(additional_payments)\`. No external payment provider, processor credentials, tax calculations, or invoicing are introduced.
 
@@ -40,11 +40,9 @@ The server adds \`repair_tickets\`, \`repair_parts\`, \`repair_payments\`, and \
 |---|---|
 | \`GET /api/repairs?history=false\` | Active queue, oldest first |
 | \`GET /api/repairs?history=true\` | Completed and cancelled history |
-| \`GET /api/repairs/technicians\` | Employees at the selected store |
 | \`GET /api/repairs/{id}\` | One ticket with parts, payments and audit timeline |
 | \`POST /api/repairs\` | Check in a repair, with an idempotency key |
 | \`PUT /api/repairs/{id}/status\` | Update status |
-| \`PUT /api/repairs/{id}/assign\` | Assign/unassign technician |
 | \`POST /api/repairs/{id}/payments\` | Record additional payment, idempotently |
 | \`POST /api/repairs/{id}/parts\` | Consume inventory part and link movement, idempotently |
 | \`POST /api/repairs/{id}/parts/{partId}/return\` | Return unused part quantity to stock, idempotently |
