@@ -105,6 +105,15 @@ jobs:
           for (const selector of ['.nav button:hover:not(.active)', '.mobile-nav button:hover:not(.active)', "body[data-theme=\"glacier\"] .nav button:hover:not(.active)"]) {
             if (!html.includes(selector)) throw new Error('Missing theme-aware navigation hover: '+selector);
           }
+          // Mobile card backgrounds must follow the selected theme, not old fixed navy colors.
+          for (const selector of ['.inventory-responsive tr,.history-responsive tr,.admin-table tr',
+              '.product-history-table tr', '.reorder-responsive tr', '.audit-entry']) {
+            const index=html.indexOf(selector);
+            if(index<0 || !html.slice(index,index+350).includes('background:var(--raised)'))
+              throw new Error('Mobile surface not theme-driven: '+selector);
+          }
+          if (html.includes('background:#14222e') || html.includes('background:#15222d'))
+            throw new Error('Legacy navy mobile card surfaces still present');
           for (const selector of ['.toolbar .search:hover:not(:disabled)', '.toolbar .search::placeholder',
               'body[data-theme="glacier"] tbody tr:hover', '.inventory-responsive tbody tr:hover']) {
             if (!html.includes(selector)) throw new Error('Missing themed search/row hover: '+selector);
