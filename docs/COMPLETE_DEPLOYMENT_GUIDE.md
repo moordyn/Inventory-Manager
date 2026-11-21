@@ -8,7 +8,7 @@ The former 1,100-line all-in-one deployment manual has been reorganized into foc
 4. [Optional networking examples](networking-examples.md) — retained step-by-step Cloudflare DNS, OPNsense DDNS/port-forwarding, Nginx Proxy Manager and TLS instructions.
 5. [Architecture](architecture.md) — services, data integrity and implementation pointers.
 6. [UI and camera acceptance](ui-qa-checklist.md) — manual and automated quality gates.
-7. [Changelog](../CHANGELOG.md) and [release notes](releases/) — version-specific history.
+7. [Changelog](../CHANGELOG.md) and [v1.2.0 release notes](releases/v1.2.0.md) — version-specific history.
 
 **Example hostname:** `inventory.example.com` is illustrative. Every deployment must supply its own domain, OAuth application, DNS, certificates, and SMTP/Gmail credentials.
 
