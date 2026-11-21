@@ -195,7 +195,8 @@ static class RepairQueueEndpoints
                 duplicate.Parameters.AddWithValue("key",req.IdempotencyKey);
                 await using var r=await duplicate.ExecuteReaderAsync();
                 if(await r.ReadAsync()){
-                    var same=r.GetString(1)==who.Value.store&&r.GetString(2)==req.Device!.Trim()&&
+                    if(r.GetString(1)!=who.Value.store)return Results.NotFound();
+                    var same=r.GetString(2)==req.Device!.Trim()&&
                        r.GetString(3)==req.RepairType!.Trim()&&r.GetDecimal(4)==req.QuotedTotal&&
                        r.GetDecimal(5)==req.PaidUpfront;
                     return same?Results.Ok(new{id=r.GetInt64(0),duplicate=true})
@@ -275,12 +276,14 @@ static class RepairQueueEndpoints
                 return Results.BadRequest("A positive payment in cents and an idempotency key are required.");
             await using var c=await connect();await using var tx=await c.BeginTransactionAsync();
             await LockKey(c,(NpgsqlTransaction)tx,req.IdempotencyKey);
-            await using(var duplicate=new NpgsqlCommand("SELECT repair_id,amount FROM repair_payments WHERE request_key=@key",c,tx)){
+            await using(var duplicate=new NpgsqlCommand("SELECT repair_id,amount,store_id FROM repair_payments WHERE request_key=@key",c,tx)){
                 duplicate.Parameters.AddWithValue("key",req.IdempotencyKey);
                 await using var reader=await duplicate.ExecuteReaderAsync();
-                if(await reader.ReadAsync())
+                if(await reader.ReadAsync()){
+                    if(reader.GetString(2)!=who.Value.store)return Results.NotFound();
                     return reader.GetInt64(0)==id&&reader.GetDecimal(1)==req.Amount
                         ?Results.Ok(new{duplicate=true}):Results.Conflict("Idempotency key is already used.");
+                }
             }
             decimal quote,paid;
             string status;
@@ -325,16 +328,17 @@ static class RepairQueueEndpoints
             await LockKey(c,(NpgsqlTransaction)tx,req.IdempotencyKey);
             // Duplicate requests are recognized before taking further stock.
             await using(var dup=new NpgsqlCommand("""
-                SELECT p.id,p.repair_id,p.item_id,p.quantity,p.movement_id,i.sku,i.barcode
+                SELECT p.id,p.repair_id,p.item_id,p.quantity,p.movement_id,p.store_id,i.sku,i.barcode
                 FROM repair_parts p JOIN items i ON i.id=p.item_id WHERE p.request_key=@key
                 """,c,tx)){
                 dup.Parameters.AddWithValue("key",req.IdempotencyKey);
                 await using var reader=await dup.ExecuteReaderAsync();
                 if(await reader.ReadAsync()){
+                    if(reader.GetString(5)!=who.Value.store)return Results.NotFound();
                     var existingId=reader.GetGuid(2);
                     var matchesItem=req.ItemId is not null?req.ItemId==existingId:
-                        code.Length>0&&(code==reader.GetString(5)||
-                          !reader.IsDBNull(6)&&code==reader.GetString(6));
+                        code.Length>0&&(code==reader.GetString(6)||
+                          !reader.IsDBNull(7)&&code==reader.GetString(7));
                     var same=reader.GetInt64(1)==id&&reader.GetInt32(3)==req.Quantity&&matchesItem;
                     return same?Results.Ok(new{duplicate=true,partId=reader.GetInt64(0),movementId=reader.GetInt64(4)})
                                :Results.Conflict("Idempotency key belongs to a different part request.");
