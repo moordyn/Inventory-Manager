@@ -377,9 +377,9 @@ await using (var c=await Connect())
     CREATE TABLE IF NOT EXISTS employees(store_id text NOT NULL REFERENCES stores(id),id text NOT NULL,name text NOT NULL,active boolean NOT NULL DEFAULT true,PRIMARY KEY(store_id,id));
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS primary_store_id text;
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS global_admin boolean NOT NULL DEFAULT false;
-    ALTER TABLE employee_store_access ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'employee';
     UPDATE employees SET primary_store_id=store_id WHERE primary_store_id IS NULL;
     CREATE TABLE IF NOT EXISTS employee_store_access(employee_id text NOT NULL,store_id text NOT NULL REFERENCES stores(id),PRIMARY KEY(employee_id,store_id));
+    ALTER TABLE employee_store_access ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'employee';
     INSERT INTO employees(store_id,id,name,primary_store_id) SELECT id,'OWNER','Original Administrator',id FROM stores WHERE NOT EXISTS(SELECT 1 FROM employees WHERE id='OWNER') ORDER BY id LIMIT 1 ON CONFLICT DO NOTHING;
     INSERT INTO employee_store_access(employee_id,store_id) SELECT id,store_id FROM employees ON CONFLICT DO NOTHING;
     UPDATE employees SET global_admin=true WHERE id='OWNER';
