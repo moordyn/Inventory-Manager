@@ -7,7 +7,7 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] Check-in stores device, repair type, total quote, upfront payment, timestamp and employee; invalid deposits are rejected.
 - [ ] Scan multiple parts using camera or select SKU; stock decrements once per usage, low-stock alerts and inventory history update.
 - [ ] Retries with same idempotency key cannot create duplicate tickets, part deductions, payments or stock returns.
-- [ ] Ticket status, assignment, additional payments, return-to-stock and activity history work; a different store cannot view or change the ticket.
+- [ ] Ticket status, automatic assignment to the check-in employee (no editable dropdown), additional payments, return-to-stock and activity history work; a different store cannot view or change the ticket.
 - [ ] On mobile, repair cards and forms stay readable and the bottom navigation permits access to all tabs.
 
 ## Sign-in and navigation
