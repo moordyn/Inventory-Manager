@@ -533,11 +533,13 @@ $('cameraBtn').onclick=async()=>{
        if(stopped)return;
        const reader=new BrowserMultiFormatReader(undefined,{delayBetweenScanAttempts:80,delayBetweenScanSuccess:120});
        // Restrict ZXing to retail barcode symbologies instead of scanning all 20+ formats.
-       reader.possibleFormats=[
-         BarcodeFormat.CODE_128,BarcodeFormat.EAN_13,BarcodeFormat.UPC_A,
-         BarcodeFormat.EAN_8,BarcodeFormat.UPC_E,BarcodeFormat.CODE_39,
-         BarcodeFormat.ITF,BarcodeFormat.CODABAR,BarcodeFormat.QR_CODE
-       ];
+       if(BarcodeFormat?.CODE_128!==undefined){
+         reader.possibleFormats=[
+           BarcodeFormat.CODE_128,BarcodeFormat.EAN_13,BarcodeFormat.UPC_A,
+           BarcodeFormat.EAN_8,BarcodeFormat.UPC_E,BarcodeFormat.CODE_39,
+           BarcodeFormat.ITF,BarcodeFormat.CODABAR,BarcodeFormat.QR_CODE
+         ].filter(format=>format!==undefined);
+       }
        // Reuse the already-playing video; do not stop and reopen the camera.
        controls=await reader.decodeFromVideoElement(video,(result)=>{
          if(result)success(result.getText());
