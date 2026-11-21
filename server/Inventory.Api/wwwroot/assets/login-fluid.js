@@ -144,7 +144,21 @@
       const a=hexColor(css.getPropertyValue('--accent'));
       const b=hexColor(css.getPropertyValue('--active-border'));
       const c=hexColor(css.getPropertyValue('--muted'));
-      colors=[richer(a,1.1),richer(b,1.45),richer(c,1.32)];
+      // Saturated companion inks stay within each chosen theme's visual family.
+      const inkColors={
+        mint:['#8df9c0','#6ad8dd','#b9f7a2'],
+        purple:['#bd88ff','#e57add','#8293ff'],
+        ocean:['#5bd8ff','#4be8d2','#87a9ff'],
+        ember:['#ffb471','#ff846f','#f5cb80'],
+        rose:['#f6a1d1','#bf89ed','#ff8fa7'],
+        slate:['#a6cefa','#7cb1d9','#c9d9f6'],
+        forest:['#abed86','#62d5a7','#d5e98d'],
+        gold:['#f6d889','#d7aa59','#fff0b1'],
+        crimson:['#ff8ba6','#d95b81','#ffb5a3'],
+        glacier:['#2d8fca','#65b7e6','#9dd2ee']
+      };
+      const chosen=inkColors[document.body.dataset.theme];
+      colors=chosen?chosen.map(hexColor):[richer(a,1.1),richer(b,1.45),richer(c,1.32)];
       if(targets){clearTargets();seed();}
     }
     if(gl && gl.getExtension('EXT_color_buffer_float')) {
