@@ -42,7 +42,7 @@ jobs:
           const repairs=fs.readFileSync('server/Inventory.Api/wwwroot/assets/repair-queue.js','utf8');
           new Function(repairs);
           for (const label of ['data-page="repairs"','id="view-repairs"','id="repairQueueList"',
-                                'id="repairNewBtn"','src="/assets/repair-queue.js?v=2"',
+                                'id="repairNewBtn"','src="/assets/repair-queue.js?v=3"',
                                 "window.RepairQueue?.open()", "window.RepairQueue?.reset()"]) {
             if (!html.includes(label)) throw new Error('Repair queue integration missing: '+label);
           }
@@ -51,6 +51,17 @@ jobs:
                                 'repairPartQty','repairCameraPart','repairShowHistory','repairConfirmPickup',
                                 'handleCameraScan']) {
             if (!repairs.includes(label)) throw new Error('Repair queue UI missing: '+label);
+          }
+          for (const marker of ['id="overviewRepairActive"','id="overviewRepairProgress"',
+                                 'id="overviewRepairPickup"','id="overviewRepairBalance"',
+                                 'id="overviewRepairTickets"','id="overviewRepairMessage"',
+                                 'window.RepairQueue?.refreshOverview()']) {
+            if (!html.includes(marker)) throw new Error('Overview repair summary missing: '+marker);
+          }
+          for (const marker of ["function overviewRender(data)", "function refreshOverview()",
+                                 "data.slice(0,4)", "r.status==='ready'||r.status==='completed'",
+                                 "const canPickup=t=>"]) {
+            if (!repairs.includes(marker)) throw new Error('Overview or ready-to-pickup functionality missing: '+marker);
           }
           const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]));
           const missing = [...html.matchAll(/\$\('([^']+)'\)/g)].map(m=>m[1]).filter(id=>!ids.has(id));
