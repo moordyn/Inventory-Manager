@@ -23,7 +23,7 @@ Replace `inventory.example.com` with a hostname **you control** (root domain or 
 - Check-in/out with transaction history, notes, atomic stock updates and idempotency protection.
 - Camera barcode scanning with native BarcodeDetector where supported and ZXing fallback; USB/Bluetooth keyboard-style scanners.
 - Reorder lists/CSV, low-stock thresholds, inventory metrics, and quick stock adjustments.
-- Store access assignment, store/global administrative roles, auditable management operations.
+- Store access assignment, store/global administrative roles, auditable management operations; store admins can rename themselves and ordinary staff in their store, global admins can rename anyone.
 - Individual employee passwords, email verification, password recovery, 15-minute idle expiration.
 - Employee self-service email changes (new-address confirmation); **only global admins** may change employee IDs, including their own. Renames revoke active sessions; the original recovery administrator retains global privileges if renamed.
 - One global Gmail API sender for store-specific low-stock recipients; optional SMTP fallback.
