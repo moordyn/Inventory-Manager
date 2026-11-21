@@ -316,6 +316,19 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
  .reorder-responsive td:nth-child(3){color:var(--amber)}
  .reorder-responsive td:last-child .btn{width:100%}
 }
+
+.checkout-note-text{font-size:12px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.checkout-note-meta{margin-top:5px;color:var(--muted);font-size:10px}
+.checkout-note-actions{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:7px}
+.checkout-note-actions .btn{min-height:30px;padding:5px 8px;font-size:11px}
+.checkout-note-editor{display:grid;gap:8px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--input);min-width:min(260px,100%)}
+.checkout-note-editor .checkout-note-label{margin:0}
+.checkout-note-editor textarea{min-height:85px;font-size:13px}
+.checkout-note-editor-actions{display:flex;flex-wrap:wrap;gap:8px}
+.checkout-note-editor-actions .btn{min-height:36px;font-size:12px}
+.checkout-note-revisions{display:grid;gap:8px;max-height:270px;overflow-y:auto;margin-top:9px;border-top:1px solid var(--line-soft);padding-top:9px}
+.checkout-note-revision{padding:8px 10px;border-radius:8px;background:var(--raised);font-size:11px;line-height:1.5;overflow-wrap:anywhere;white-space:pre-wrap}
+@media(max-width:760px){.history-responsive td:nth-child(6){grid-column:1/-1;grid-row:5;text-align:left!important}.checkout-note-editor{width:100%}}
 </style></head><body>
 <div id="auth" class="login-screen"><div class="card login-card"><div class="brand brand-login"><img class="brand-wordmark brand-wordmark-login" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async" fetchpriority="high"></div><div id="setup" class="hidden"><h1>Set up your inventory</h1><p>Enter the one-time installation token, then create a six-digit PIN.</p><form id="setupForm"><label for="setupToken">Installation token</label><input id="setupToken" required autocomplete="off"><label for="newPin">New PIN</label><input id="newPin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><label for="confirmPin">Confirm PIN</label><input id="confirmPin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><button class="btn primary">Create PIN</button></form></div><div id="employeeLogin" class="hidden"><h1>Employee sign in</h1><p>Enter your employee ID to access your assigned store.</p><form id="employeeForm"><label for="employeeId">Employee ID</label><input id="employeeId" required autocomplete="off"><button class="btn primary">Access inventory</button></form><p style="margin-top:20px"><button class="btn ghost" id="adminLoginBtn">Administrator access</button></p></div><div id="login" class="hidden"><h1>Welcome back</h1><p>Enter your six-digit PIN to access your inventory.</p><form id="loginForm"><label for="adminEmployeeId">Administrator Employee ID</label><input id="adminEmployeeId" autocomplete="off" placeholder="OWNER" value="OWNER" required><label for="pin">Access PIN</label><input id="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="off" autofocus><button class="btn primary">Unlock administration</button></form><p style="margin-top:18px"><button type="button" class="btn ghost" id="employeeLoginBtn">Employee login</button></p></div><div id="authLoading" class="muted" style="padding:12px 0" role="status">Connecting to the inventory server…</div><div id="authMsg" class="message" role="status" aria-live="polite"></div></div></div>
 <div id="app" class="shell hidden"><aside class="sidebar"><div class="brand brand-sidebar"><img class="brand-wordmark brand-wordmark-sidebar" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async"><div id="locationBrand" class="brand-location">Store location</div></div><nav class="nav" id="sideNav" aria-label="Main navigation"><button data-page="overview" class="active"><span>▦</span> Overview</button><button data-page="inventory"><span>▤</span> Inventory</button><button data-page="checkin"><span>↙</span> Check In</button><button data-page="checkout"><span>↗</span> Check Out</button><button data-page="history"><span>◷</span> History</button><button data-page="settings"><span>⚙</span> Settings</button><button data-page="administration" id="adminNav" class="hidden"><span>♙</span> Administration</button></nav><div class="sidebar-foot"><div style="color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">Signed in as</div><div id="signedInEmployee" style="font-size:15px;font-weight:700;color:#f0f2f5;overflow-wrap:anywhere;margin-top:4px">—</div><div id="signedInEmployeeId" style="margin-top:3px">—</div><button type="button" class="btn warn" id="sidebarLogoutBtn" style="width:100%;margin-top:12px">Sign out</button><div id="idleCountdown" style="margin-top:8px;font-size:11px" aria-live="off">Auto sign-out after 30s inactivity</div><div style="margin-top:16px">ZAGG Inventory Manager · Secure inventory access</div></div></aside>
@@ -407,7 +420,7 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
-let token=sessionStorage.getItem('inventory-token')||'',items=[],history=[],reorderRows=[],page='overview',busy=false,stream=null,identity=null,allowedStores=[];
+let token=sessionStorage.getItem('inventory-token')||'',items=[],history=[],productHistoryRows=[],activeProductHistoryItemId=null,reorderRows=[],page='overview',busy=false,stream=null,identity=null,allowedStores=[];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=x=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(Number(x||0));
 const time=x=>new Date(x).toLocaleString();
@@ -484,7 +497,35 @@ document.addEventListener('click',e=>{const nav=e.target.closest('[data-page],[d
 async function load(){try{const results=await Promise.all([api('items'),api('movements'),api('summary')]);items=results[0];history=results[1];const summary=results[2];$('statProducts').textContent=Number(summary.products).toLocaleString();$('statUnits').textContent=Number(summary.units).toLocaleString();$('statLow').textContent=Number(summary.lowStock).toLocaleString();$('statValue').textContent=money(summary.value);$('status').textContent='● Connected';$('status').classList.remove('offline');render()}catch(e){$('status').textContent='● Offline';$('status').classList.add('offline');toast('Sync failed: '+e.message,true)}}
 function itemRow(x){return '<tr><td data-label="Product"><div class="item-name">'+esc(x.name)+'</div><small>'+esc(x.sku)+'</small></td><td data-label="Category">'+esc(x.category||'—')+'</td><td data-label="Stock"><strong>'+x.quantity+'</strong></td><td data-label="Status"><span class="tag '+(x.quantity<=x.minStock?'low':'ok')+'">'+(x.quantity<=x.minStock?'Low stock':'In stock')+'</span></td><td data-label="Action"><div class="inventory-row-actions"><button type="button" class="btn" data-adjust="'+esc(x.id)+'">Adjust</button><button type="button" class="btn ghost" data-edit="'+esc(x.id)+'">Edit</button></div></td></tr>'}
 function itemTable(list){return list.length?'<table class="inventory-responsive"><thead><tr><th>Product / SKU</th><th>Category</th><th>Stock</th><th>Status</th><th></th></tr></thead><tbody>'+list.map(itemRow).join('')+'</tbody></table>':'<div class="empty">No matching products found</div>'}
-function historyTable(list){return list.length?'<table class="history-responsive"><thead><tr><th>Product</th><th>Movement</th><th>Balance</th><th>When</th><th>Employee</th><th>Note</th></tr></thead><tbody>'+list.map(x=>'<tr><td data-label="Product">'+esc(x.name)+'<br><small>'+esc(x.sku)+'</small></td><td data-label="Movement" class="'+(x.delta>0?'accent':'amber')+'">'+(x.delta>0?'+':'')+x.delta+'</td><td data-label="Balance">'+x.after+'</td><td data-label="When">'+esc(time(x.time))+'</td><td data-label="Employee">'+esc(x.employeeId||'LEGACY')+'</td><td data-label="Note">'+esc(x.note||'—')+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">No transactions yet</div>'}
+function canEditCheckoutNote(entry){
+ return Number(entry.delta)<0&&(identity?.isAdmin||entry.employeeId===identity?.employeeId);
+}
+function noteCellMarkup(entry){
+ const id=String(entry.id);
+ const note=entry.note||'—';
+ const lastEdit=entry.noteUpdatedAt
+  ?'<div class="checkout-note-meta">Edited '+esc(time(entry.noteUpdatedAt))+' by '+esc(entry.noteUpdatedBy||'Unknown')+'</div>'
+  :'';
+ const actions=Number(entry.delta)<0
+  ?'<div class="checkout-note-actions">'+
+    (canEditCheckoutNote(entry)?'<button type="button" class="btn ghost" data-edit-checkout-note="'+esc(id)+'">Edit note</button>':'')+
+    ((entry.noteRevision||0)>0?'<button type="button" class="btn ghost" data-view-checkout-revisions="'+esc(id)+'">View changes</button>':'')+
+    '</div>'
+  :'';
+ return '<div class="movement-note-cell" data-note-cell="'+esc(id)+'"><div class="checkout-note-text">'+esc(note)+'</div>'+lastEdit+actions+'</div>';
+}
+function historyTable(list){
+ return list.length
+ ?'<table class="history-responsive"><thead><tr><th>Product</th><th>Movement</th><th>Balance</th><th>When</th><th>Employee</th><th>Note</th></tr></thead><tbody>'+
+ list.map(x=>'<tr><td data-label="Product">'+esc(x.name)+'<br><small>'+esc(x.sku)+'</small></td><td data-label="Movement" class="'+(x.delta>0?'accent':'amber')+'">'+(x.delta>0?'+':'')+x.delta+'</td><td data-label="Balance">'+x.after+'</td><td data-label="When">'+esc(time(x.time))+'</td><td data-label="Employee">'+esc(x.employeeId||'LEGACY')+'</td><td data-label="Note">'+noteCellMarkup(x)+'</td></tr>').join('')+'</tbody></table>'
+ :'<div class="empty">No transactions yet</div>';
+}
+function productHistoryTable(events){
+ return events.length?
+ '<table class="product-history-table"><thead><tr><th>Change</th><th>Before</th><th>After</th><th>When</th><th>Employee</th><th>Note</th></tr></thead><tbody>'+
+ events.map(x=>'<tr><td data-label="Change" class="'+(x.delta>0?'accent':'amber')+'"><strong>'+(x.delta>0?'+':'')+Number(x.delta)+'</strong></td><td data-label="Before">'+Number(x.before)+'</td><td data-label="After">'+Number(x.after)+'</td><td data-label="When">'+esc(time(x.time))+'</td><td data-label="Employee">'+esc(x.employeeId||'LEGACY')+'</td><td data-label="Note">'+noteCellMarkup(x)+'</td></tr>').join('')+
+ '</tbody></table>':'<div class="empty">No stock movements recorded for this product yet.</div>';
+}
 function render(){if(!items)return;const q=$('globalScan').value.trim().toLowerCase();let list=items.filter(x=>(x.name+' '+x.sku+' '+(x.barcode||'')+' '+(x.category||'')).toLowerCase().includes(q));if($('stockFilter').value==='low')list=list.filter(x=>x.quantity<=x.minStock);if($('stockFilter').value==='available')list=list.filter(x=>x.quantity>0);$('inventoryCount').textContent=list.length.toLocaleString()+' product'+(list.length===1?'':'s')+' shown'+(q?' matching your search':'');$('inventoryTable').innerHTML=itemTable(list);$('recentItems').innerHTML=itemTable(items.slice(0,6));$('recentHistory').innerHTML=historyTable(history.slice(0,6));$('historyTable').innerHTML=historyTable(history);for(const direction of ['checkin','checkout']){const el=$(direction+'Item'),selected=el.value;el.innerHTML=items.map(x=>'<option value="'+x.id+'">'+esc(x.name)+' — '+esc(x.sku)+' ('+x.quantity+' in stock)</option>').join('');if(items.some(x=>x.id===selected))el.value=selected}}
 
 async function loadReorder(){
@@ -591,10 +632,9 @@ async function toggleProductHistory(item){
  try{
   const events=await api('items/'+encodeURIComponent(item.id)+'/history');
   if(!output.isConnected)return;
-  output.innerHTML=events.length?
-   '<table class="product-history-table"><thead><tr><th>Change</th><th>Before</th><th>After</th><th>When</th><th>Employee</th><th>Note</th></tr></thead><tbody>'+
-   events.map(x=>'<tr><td data-label="Change" class="'+(x.delta>0?'accent':'amber')+'"><strong>'+(x.delta>0?'+':'')+Number(x.delta)+'</strong></td><td data-label="Before">'+Number(x.before)+'</td><td data-label="After">'+Number(x.after)+'</td><td data-label="When">'+esc(time(x.time))+'</td><td data-label="Employee">'+esc(x.employeeId||'LEGACY')+'</td><td data-label="Note">'+esc(x.note||'—')+'</td></tr>').join('')+
-   '</tbody></table>':'<div class="empty">No stock movements recorded for this product yet.</div>';
+  activeProductHistoryItemId=item.id;
+  productHistoryRows=events;
+  output.innerHTML=productHistoryTable(events);
   panel.dataset.loaded='true';
  }catch(err){if(output.isConnected)output.innerHTML='<div class="empty">Unable to load product history: '+esc(err.message)+'</div>'}
 }
@@ -673,6 +713,87 @@ async function movement(id,delta,note){
  finally{busy=false}
 }
 for(const dir of ['checkin','checkout'])$(dir+'Form').onsubmit=async e=>{e.preventDefault();const id=$(dir+'Item').value,qty=Number($(dir+'Qty').value);if(!id||!Number.isSafeInteger(qty)||qty<1)return toast('Select a product and positive quantity',true);if(dir==='checkout'&&!$(dir+'Note').value.trim())return toast('Checkout reason is required',true);if(await movement(id,qty*(dir==='checkin'?1:-1),$(dir+'Note').value)){$(dir+'Note').value='';$(dir+'Qty').value='1'}};
+function findCheckoutNoteEntry(id){
+ return history.find(x=>String(x.id)===String(id))||
+        productHistoryRows.find(x=>String(x.id)===String(id));
+}
+function rerenderCheckoutNotes(){
+ render();
+ const panel=$('productHistoryList');
+ if(panel&&panel.isConnected&&activeProductHistoryItemId)
+  panel.innerHTML=productHistoryTable(productHistoryRows);
+}
+function openCheckoutNoteEditor(button,entry){
+ const cell=button.closest('[data-note-cell]');
+ if(!cell||!canEditCheckoutNote(entry))return;
+ if(cell.querySelector('.checkout-note-editor'))return;
+ cell.innerHTML='<div class="checkout-note-editor"><label class="checkout-note-label" for="checkoutNoteEdit'+entry.id+'">Update checkout note</label>'+
+  '<textarea id="checkoutNoteEdit'+entry.id+'" maxlength="1000" rows="3" required placeholder="Example: Damaged during repair">'+esc(entry.note||'')+'</textarea>'+
+  '<div class="checkout-note-editor-actions"><button type="button" class="btn" data-cancel-checkout-note>Cancel</button><button type="button" class="btn primary" data-save-checkout-note="'+esc(entry.id)+'">Save note</button></div>'+
+  '<p class="field-note">This updates the note only. Stock quantity, checkout time, and employee remain unchanged.</p></div>';
+ cell.querySelector('textarea')?.focus();
+}
+document.addEventListener('click',async e=>{
+ const edit=e.target.closest('[data-edit-checkout-note]');
+ if(edit){
+  const entry=findCheckoutNoteEntry(edit.dataset.editCheckoutNote);
+  if(entry)openCheckoutNoteEditor(edit,entry);
+  return;
+ }
+ const cancel=e.target.closest('[data-cancel-checkout-note]');
+ if(cancel){
+  const cell=cancel.closest('[data-note-cell]');
+  const entry=cell&&findCheckoutNoteEntry(cell.dataset.noteCell);
+  if(entry)cell.outerHTML=noteCellMarkup(entry);
+  return;
+ }
+ const save=e.target.closest('[data-save-checkout-note]');
+ if(save){
+  const id=save.dataset.saveCheckoutNote,entry=findCheckoutNoteEntry(id),cell=save.closest('[data-note-cell]');
+  const textarea=cell?.querySelector('textarea');
+  if(!entry||!textarea)return;
+  const note=textarea.value.trim();
+  if(!note||note.length>1000){toast('Enter a note between 1 and 1000 characters.',true);textarea.focus();return}
+  if(note===(entry.note||'').trim()){cell.outerHTML=noteCellMarkup(entry);return}
+  save.disabled=true;save.textContent='Saving…';
+  try{
+   const updated=await api('movements/'+encodeURIComponent(id)+'/note','PUT',{note,expectedRevision:entry.noteRevision||0});
+   for(const row of history.concat(productHistoryRows)){
+    if(String(row.id)!==String(id))continue;
+    row.note=updated.note;
+    row.noteRevision=updated.noteRevision;
+    if(updated.updated){row.noteUpdatedBy=updated.noteUpdatedBy||identity?.employeeId;row.noteUpdatedAt=new Date().toISOString()}
+   }
+   rerenderCheckoutNotes();
+   toast('Checkout note updated');
+  }catch(err){
+   toast('Could not update checkout note: '+err.message,true);
+   if(cell.isConnected){save.disabled=false;save.textContent='Save note'}
+   if(String(err.message).includes('changed by someone else'))await load();
+  }
+  return;
+ }
+ const revisions=e.target.closest('[data-view-checkout-revisions]');
+ if(revisions){
+  const cell=revisions.closest('[data-note-cell]'),id=revisions.dataset.viewCheckoutRevisions;
+  if(!cell)return;
+  const existing=cell.querySelector('.checkout-note-revisions');
+  if(existing){existing.remove();return}
+  const container=document.createElement('div');
+  container.className='checkout-note-revisions';
+  container.textContent='Loading previous note changes…';
+  cell.appendChild(container);
+  try{
+   const edits=await api('movements/'+encodeURIComponent(id)+'/note-edits');
+   if(!container.isConnected)return;
+   container.innerHTML=edits.length?edits.map(x=>
+    '<div class="checkout-note-revision"><strong>Revision '+Number(x.revision)+'</strong> · '+esc(time(x.time))+' · '+esc(x.employeeId)+
+    '<div>Before: '+esc(x.previousNote||'—')+'</div><div>After: '+esc(x.note)+'</div></div>'
+   ).join(''):'<p class="muted">No previous edits recorded.</p>';
+  }catch(err){if(container.isConnected)container.textContent='Unable to load note changes: '+err.message}
+  return;
+ }
+});
 document.addEventListener('click',e=>{
  const adjust=e.target.closest('[data-adjust]');
  if(adjust){const item=items.find(x=>x.id===adjust.dataset.adjust);if(item)openMovement(item);return}
