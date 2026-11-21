@@ -299,6 +299,34 @@ app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,
     cmd.Parameters.AddWithValue("employee",id);cmd.Parameters.AddWithValue("store",req.StoreId??"");
     await cmd.ExecuteNonQueryAsync();return Results.Ok(new{assigned=true});
 });
+// Additional store access can be revoked, but an employee must retain their primary location.
+app.MapDelete("/api/admin/employees/{id}/stores/{storeId}",async (HttpContext ctx,string id,string storeId)=>{
+    var who=await Identity(ctx);
+    if(who is null)return Results.Unauthorized();
+    if(!await CanManageStore(ctx,storeId))return Results.Forbid();
+    // Prevent a store administrator from revoking their own access mid-session.
+    if(!who.Value.globalAdmin&&id==who.Value.employee)return Results.Forbid();
+
+    await using var c=await Connect();
+    await using var tx=await c.BeginTransactionAsync();
+    string primaryStore;bool targetGlobalAdmin;
+    await using(var getEmployee=new NpgsqlCommand("SELECT primary_store_id,global_admin FROM employees WHERE id=@employee FOR UPDATE",c,tx)){
+        getEmployee.Parameters.AddWithValue("employee",id);
+        await using var reader=await getEmployee.ExecuteReaderAsync();
+        if(!await reader.ReadAsync())return Results.NotFound("Employee not found.");
+        primaryStore=reader.GetString(0);targetGlobalAdmin=reader.GetBoolean(1);
+    }
+    if(primaryStore==storeId)return Results.BadRequest("The employee's primary store access cannot be removed.");
+    if(targetGlobalAdmin&&!who.Value.globalAdmin)return Results.Forbid();
+
+    await using(var remove=new NpgsqlCommand("DELETE FROM employee_store_access WHERE employee_id=@employee AND store_id=@store",c,tx)){
+        remove.Parameters.AddWithValue("employee",id);
+        remove.Parameters.AddWithValue("store",storeId);
+        if(await remove.ExecuteNonQueryAsync()!=1)return Results.NotFound("The employee does not have access to this store.");
+    }
+    await tx.CommitAsync();
+    return Results.Ok(new{removed=true,employeeId=id,storeId});
+});
 app.MapGet("/api/admin/employee-access",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();
     await using var c=await Connect();
