@@ -4,7 +4,6 @@ Self-hosted barcode inventory application for Windows browsers, mobile browsers,
 
 > **Complete installation / deployment / recovery:** [ZAGG Inventory Manager end-to-end deployment guide](docs/COMPLETE_DEPLOYMENT_GUIDE.md). This covers a new Ubuntu 24.04/Proxmox installation, Docker Compose/PostgreSQL, Cloudflare DNS, OPNsense DDNS, Nginx Proxy Manager, HTTPS, exact Google OAuth callback and Gmail setup, first-run admin/employee configuration, backups, restore testing, updates and troubleshooting. **Follow this document for new deployments and franchise handover.**
 
-
 ## Current web build
 - Consistent desktop/tablet/mobile design system: sticky sidebar, responsive KPI cards and record tables, compact mobile navigation, accessible dialogs and form labels
 - Fast camera barcode scanning: native BarcodeDetector when supported, prewarmed ZXing fallback on Safari, one camera stream, retail-format hints, flashlight support where available, and clean camera shutdown
@@ -48,13 +47,13 @@ In Google Cloud, authorize **`https://zagginventorymanager.com`** as a JavaScrip
 - `deploy`: Docker Compose, Ubuntu installer, PostgreSQL backup timer
 - `docs`: architecture and deployment notes
 
-## Documentation and visual/camera quality assurance
+## Documentation
 
 - [Complete installation, deployment, OAuth, backups, restore and operational handover](docs/COMPLETE_DEPLOYMENT_GUIDE.md)
 - [Deployment quick reference](docs/deployment.md)
 - [Current architecture and security limitations](docs/architecture.md)
 
-## Visual and camera quality assurance
+### Visual and camera quality assurance
 See [docs/ui-qa-checklist.md](docs/ui-qa-checklist.md) for the full mobile, desktop, accessibility, barcode, administrator and production acceptance checklist. The UI and scanner static regression checks run in GitHub Actions, but real-device camera speed and production readiness must be validated on the deployed server.
 
 ## Reporting, reorder and administrator activity
