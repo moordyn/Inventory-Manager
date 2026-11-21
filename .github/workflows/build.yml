@@ -47,8 +47,8 @@ jobs:
             if (!html.includes(label)) throw new Error('Repair queue integration missing: '+label);
           }
           for (const label of ["api('repairs?history='", "api('repairs/'+id+'/parts'",
-                                "api('repairs/'+id+'/payments'", 'repairPartCode',
-                                'repairPartQty','repairCameraPart','repairShowHistory',
+                                "api('repairs/'+id+'/pickup'", 'repairPartCode',
+                                'repairPartQty','repairCameraPart','repairShowHistory','repairConfirmPickup',
                                 'handleCameraScan']) {
             if (!repairs.includes(label)) throw new Error('Repair queue UI missing: '+label);
           }
