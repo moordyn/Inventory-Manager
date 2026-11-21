@@ -6,7 +6,7 @@
 **Guide updated:** November 2026; grounded in this repository's installer, Compose file, API, Google integration, database scripts, and vendor documentation. All example domains and IP labels are placeholders.  
 **Audience:** The installer, store owner, network administrator, Google Cloud administrator, and anyone taking over long-term maintenance.
 
-> **Important status:** This is a detailed deployment and recovery runbook, **not** proof of a production security review. The app's ordinary employee login currently requires only an employee ID. Certain store administrator sessions can also be reached through this login route. Protect the site with a stronger authentication/access-control layer or implement proper per-user authentication **before exposing sensitive business inventory data to the public internet**. Also verify the actual current GitHub Actions results, on-site scanner behavior, database backup/restore, and permissions. Do not mistake a successful Docker startup for successful end-to-end testing.
+> **Important status:** This is a detailed deployment and recovery runbook, **not** proof of a production security review. Employees now use individual passwords and verified emails. However, **self-registration is first-claim by employee ID**: an unauthorized person knowing an unactivated employee ID may register their own email. Restrict first-time activation to trusted staff networks or add an identity-aware access gateway **before exposing sensitive business inventory data to the public internet**. Also verify the actual current GitHub Actions results, on-site scanner behavior, database backup/restore, and permissions. Do not mistake a successful Docker startup for successful end-to-end testing.
 >
 > **Scope:** This guide documents the current application. It does **not** claim that the Inventory Manager installer configures Proxmox, OPNsense, Cloudflare, public certificates, Nginx Proxy Manager, or Google Cloud for you. Those are separate manual steps.
 
@@ -146,7 +146,7 @@ Before changing anything, make a **private** deployment worksheet for *this cust
 | Offsite database + `.env` backup destination | [your values] |
 | Support contact and restoration approver | [your values] |
 
-The sample domains in this guide belong to the **example namespace only**; they are not owned by this project or by an installer. Never commit domain transfer credentials, Cloudflare keys, private TLS keys, Google OAuth JSON, Gmail refresh tokens, `.env`, or administrator PINs.
+The sample domains in this guide belong to the **example namespace only**; they are not owned by this project or by an installer. Never commit domain transfer credentials, Cloudflare keys, private TLS keys, Google OAuth JSON, Gmail refresh tokens, `.env`, or administrator setup secrets.
 
 ### Decide on a deployment profile
 
@@ -202,7 +202,7 @@ If the host is not Ubuntu 24.04, the installer exits by design. Do not bypass th
 
 ### 3.3 Security gate before Internet exposure
 
-**Current ordinary employee login requires an employee ID only; it is not strong authentication.** A store administrator role can be reachable from such a login session. Put the installation behind a trusted VPN or identity-aware gateway with MFA and/or implement strong individual user credentials before exposing business data on a public domain. Test the OAuth callback, browser/mobile scanners, authorized customer devices and alert delivery with any gateway restrictions. Rebranding is also required when using the software outside the rights attached to its existing ZAGG visual assets.
+Employee logins now require per-user passwords and email activation, but **unclaimed employee IDs can be claimed by the first person who activates them with an email**. Email verification proves possession of that email, not employment identity. Protect enrollment on untrusted networks with an approved access gateway/VPN, and verify who may activate store-admin IDs. Test the OAuth callback, browser/mobile scanners, authorized customer devices and alert delivery with any gateway restrictions. Rebranding is also required when using the software outside the rights attached to its existing ZAGG visual assets.
 
 ---
 
@@ -289,7 +289,7 @@ curl -fsS http://127.0.0.1:18424/api/auth/status
 
 The printed `PUBLIC_ORIGIN` must be **your** domain, not the example. Do **not** print the full `.env` for support or paste it into chat.
 
-The API/database should be healthy and the LAN HTTP port should respond. A new database shows `initialized:false` until the PIN setup. `/health` tests API process status, **not** all workflows or database health.
+The API/database should be healthy and the LAN HTTP port should respond. A new database shows `initialized:false` until the OWNER administrator completes installation-token email/password setup. `/health` tests API process status, **not** all workflows or database health.
 
 The current Compose file maps host **18424** to API container **8080**, with PostgreSQL on the internal Docker network. Block unsolicited access to 18424 from the Internet.
 
@@ -302,7 +302,7 @@ The current Compose file maps host **18424** to API container **8080**, with Pos
 - SQL backups go to `/var/backups/inventory-manager` and **must** be copied to a separate protected location.
 - Never run `docker compose down -v` or `docker volume prune` as a routine update.
 
-**Next:** set up your DNS and HTTPS route using §6–§8, then complete the first-run PIN and optional Google authorization.
+**Next:** set up your DNS and HTTPS route using §6–§8, then complete the OWNER account bootstrap and optional Google authorization.
 
 ---
 
@@ -629,11 +629,11 @@ Click **Save** in Google Cloud. Download the Web OAuth client **JSON** **after**
 
 First verify the application itself works at **your own HTTPS domain**, configured by `PUBLIC_ORIGIN` (for example only, `https://inventory.example.com`).
 
-1. Sign in with **Administrator access** using the **global administrator** account (<code>OWNER</code> by default) and the six-digit PIN.
+1. Sign in with **Employee sign in** using the global administrator account (<code>OWNER</code> by default) and its individual password created during the installation-token bootstrap.
 2. Open **Administration**.
 3. Locate the **Google OAuth configuration** section.
 4. Choose the downloaded **Web application OAuth client JSON** (size must be under **24 KB**).
-5. Enter/confirm the global administrator PIN.
+5. Confirm the signed-in global administrator's **account password**.
 6. Select **Import Google configuration**.
 7. Confirm the UI reports configuration as ready.
 
@@ -746,7 +746,7 @@ The global Gmail OAuth sender takes precedence when connected and functional. An
 
 ### 12.1 Employee workflow
 
-- Employee login: use the employee ID after your chosen network access controls. Select an authorized store if applicable.
+- Employee login: activate an employee ID with a one-time email link, then sign in with **employee ID + password**. Select an authorized store if applicable.
 - Inventory: search SKU, name, barcode or category; view stock and low-stock state.
 - Scan: USB/Bluetooth scanners acting as keyboards, or an HTTPS mobile browser camera with permission.
 - Checkout: choose a product and negative stock movement, provide the required reason, and **save**. The API refuses stock going below zero.
@@ -784,7 +784,7 @@ The file <code>/opt/inventory-manager/.env</code> should be owned by an authoriz
 | Variable | Where used | Required? | Handling |
 | --- | --- | --- | --- |
 | <code>POSTGRES_PASSWORD</code> | Database and API connection string via Compose | **Yes** | Installer generates 32 random bytes as hex; retain for existing volume |
-| <code>SETUP_TOKEN</code> | One-time admin PIN enrollment | **Yes** | Installer generates; printed by installer; don't publish |
+| <code>SETUP_TOKEN</code> | One-time OWNER email/password bootstrap, including migration from legacy PIN authentication | **Yes** | Installer generates; printed by installer; don't publish |
 | <code>PUBLIC_ORIGIN</code> | **Your own canonical public HTTPS URL; also used for OAuth redirect validation** | **Yes on new installs** | Enter when first prompted, e.g. `https://inventory.example.com` **placeholder only**; no slash, port, path, query, or fragment; must match DNS/TLS/Google client |
 | <code>GOOGLE_TOKEN_KEY</code> | AES-GCM encryption/decryption of Google OAuth secrets and refresh tokens | **Yes for dashboard OAuth/Gmail** | 64 hex characters representing 32 bytes; **never rotate casually** |
 | <code>GOOGLE_CLIENT_ID</code> | Optional server-side OAuth client config | Optional | Dashboard-imported client may override at startup |
@@ -926,7 +926,7 @@ sudo bash deploy/install.sh
 
 ### 15.2 What updates preserve
 
-The installer does not intentionally delete the PostgreSQL named volume, re-enroll the PIN or rotate existing secrets. Database schema initialization/migration in <code>Program.cs</code> runs on API startup, so schema changes may execute during deployment. **Back up before updates**, especially ones introducing migrations.
+The installer does not intentionally delete the PostgreSQL named volume, change existing passwords or rotate existing secrets. The v1.1.0 migration **revokes legacy PIN/ID-only sessions once**. Database schema initialization/migration in <code>Program.cs</code> runs on API startup, so schema changes may execute during deployment. **Back up before updates**, especially ones introducing migrations.
 
 ### 15.3 Rollback considerations
 
@@ -968,7 +968,7 @@ If you are upgrading an earlier installation that had its origin embedded in cod
 | Wrong app/site appears | Reverse proxy's hostname routed to wrong service | Verify the configured HTTPS proxy host and exact site FQDN |
 | Site redirects repeatedly | Proxy HTTPS redirect conflict or incompatible CDN SSL mode | Verify matching certificate and HTTPS redirects; if Cloudflare proxied use Full (strict) |
 | Cloudflare DNS shows another IP | Wrong DDNS zone/hostname/public-IP detection | OPNsense DDNS account and Cloudflare dashboard (not public dig for proxied records) |
-| No initial PIN setup screen | Database already enrolled | <code>/api/auth/status</code>; existing PIN remains; installer is not PIN reset |
+| No initial administrator setup screen | OWNER already enrolled, or incorrect migration state | Check <code>/api/auth/status</code>; legacy deployments require the original setup token to enroll OWNER with a password |
 | Google JSON import rejected | Wrong client's JSON, invalid Web application type, mismatch with this installation's PUBLIC_ORIGIN/callback, or missing encryption key | Confirm <code>PUBLIC_ORIGIN</code> is **your real hostname**, configure **your own** Google OAuth Web client with matching origin/callback, re-download JSON; verify <code>GOOGLE_TOKEN_KEY</code> |
 | Google <code>redirect_uri_mismatch</code> | `PUBLIC_ORIGIN` differs from OAuth client authorized redirect, extra `www`, old JSON or wrong host | Compare your server's `PUBLIC_ORIGIN` with Google `PUBLIC_ORIGIN + /api/google/callback`, verify installed client and restart |
 | Google connection returns canceled/expired | Consent declined or state timed out | Retry promptly in same browser; verify server clock |
@@ -1004,7 +1004,7 @@ Do **not** include any environment secrets, bearer tokens, PINs, OAuth codes or 
 
 ### 17.1 Minimum security work before public business use
 
-- [ ] Replace or augment employee-ID-only authentication with real individual authentication, strong credentials/MFA and role enforcement. Audit **store-admin login by employee ID** specifically.
+- [ ] Verify employee ID/password authentication, email verification and password-reset protections; mitigate the **first-claim activation risk** for unused employee IDs.
 - [ ] Limit exposure using a VPN / trusted network / identity-aware gateway (e.g., Cloudflare Access where appropriate) until authentication is hardened.
 - [ ] Restrict TCP/18424 to NPM/trusted management LAN; protect NPM admin port 81 and Proxmox/OPNsense management separately.
 - [ ] Monitor TLS/certificate renewals; if using Cloudflare proxied mode, verify Full (strict).
@@ -1056,7 +1056,10 @@ A person other than the original developer should be able to walk through this c
 - [ ] Another business's domain is not referenced in my active DNS, proxy, `.env`, or OAuth configuration.
 
 ### Application
-- [ ] Global admin enrolls PIN once and logs in as OWNER.
+- [ ] Global admin enrolls OWNER's email and password with the setup token; old PIN login is disabled.
+- [ ] First-time employee enters email and password twice, receives a single-use 24-hour verification link and activates only after email verification.
+- [ ] Forgot-password uses a one-time 30-minute link sent to the verified mailbox and revokes old sessions after reset.
+- [ ] Visible countdown is gone; 15-minute inactivity logout is enforced in browser and server, without background polling extending access.
 - [ ] At least two stores and two employees demonstrate proper access isolation.
 - [ ] Add/search/edit a product and scan barcode on desktop and mobile.
 - [ ] Check-in/out changes quantity exactly once; checkout requires reason.
