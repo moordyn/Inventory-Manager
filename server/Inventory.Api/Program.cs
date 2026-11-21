@@ -172,7 +172,7 @@ async Task SignInSucceeded(HttpContext ctx,string kind){
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 // The installation token is a one-time bootstrap credential for the original OWNER.
 // No shared PIN remains accepted for login after the password-authentication migration.
-static bool ThemeValid(string? theme)=>theme is "mint" or "purple" or "ocean" or "ember" or "rose";
+static bool ThemeValid(string? theme)=>theme is "mint" or "purple" or "ocean" or "ember" or "rose" or "glacier" or "slate" or "forest" or "gold" or "crimson";
 app.MapGet("/api/auth/status", async ()=>{
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=(SELECT value FROM settings WHERE key='owner_employee_id') AND active AND global_admin AND password_hash IS NOT NULL)",c);
