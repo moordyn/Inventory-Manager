@@ -19,25 +19,13 @@ Inventory Manager provides **ten themes (nine dark, one light)**, each with its 
 
 All ten use the same information architecture and responsive page layout. The selector shows three sample color swatches and highlights the selected palette. The logo geometry and text stay consistent across brands while the accent and supporting lettering are recolored; the matching favicon changes too.
 
-## Interactive login fluid simulation
+## Interactive sign-in aurora
 
-The sign-in, first-time setup, and password recovery screen now uses **mouse-driven, theme-coordinated fluid smoke** rather than independent expanding radial-glow particles. A self-contained **WebGL2 fluid solver** advects colored dye through a velocity field, computes curl/vorticity, divergence, an iterative pressure projection, and subtracts the pressure gradient. Mouse dragging adds momentum and pigment to the fluid; nearby color is displaced into swirling clouds, eddies and dissipating plumes. Gentle autonomous motion keeps the background alive without input.
+The sign-in, first-time setup, and password-recovery screen now includes a **theme-matched animated cloud backdrop**. Five soft ambient light fields drift in the background; moving or dragging the mouse (and touch movement on compatible devices) leaves a short, luminous colored wake that grows and dissipates. The colors are derived from the currently selected **public login theme**, so changing the global login palette also changes the background illumination. **Glacier Light** uses a lower-opacity effect suitable for a pale backdrop.
 
-The target visual reference is the **Windhawk Fluid Wallpaper 1.0.0** (October 2026), which is a Direct3D port of Pavel Dobryakov's MIT-licensed WebGL Fluid Simulation. The login implementation remains self-contained and uses the corresponding GPU fluid principles; it is theme-aware rather than copying the source's fixed/default color scheme. References: https://www.reddit.com/r/Windhawk/comments/1x184qq/fluid_wallpaper_100/ and https://github.com/PavelDoGreat/WebGL-Fluid-Simulation .
+The animation is a decorative, pointer-transparent HTML canvas located **behind** the login card: it does not capture clicks, block keyboard navigation, or overlay form controls. Rendering is limited to approximately 30 frames per second with a capped device-pixel ratio. The animation pauses when the signed-in application replaces the login view or the browser tab is hidden. Users who enable **Reduce Motion** see a static soft theme-color glow instead. No background asset, WebGL, server interaction, or external dependency is required.
 
-The renderer's display shader was repaired after an invalid GLSL block prevented successful compilation in real browsers. The dedicated Chromium GPU smoke test in `tests/login-fluid-browser.cjs` checks that mouse movement produces actual rendered pixels, not merely that the JavaScript parses. The visual result is still subject to comparison with the reference, especially bloom and sunray intensity.
-
-The revised fluid effect responds to **ordinary mouse movement and stronger click-drag gestures**, without continuously emitting dye. A replenishing per-second ink budget limits how much color can accumulate even during long movements. A drag adds a small, bounded amount of colored ink and momentum; ordinary mouse hovering does not paint. The fluid disperses and fades instead of building up until the entire screen is covered. Dye is rendered at a higher resolution with smooth sampling, while the cheaper velocity/pressure grid remains lower resolution. The canvas is transparent over a theme-matched CSS gradient to prevent a black or flat background.
-
-The whole canvas renders against the currently configured **global login theme** (the page is *never forced to black*). Theme colors are drawn from the existing accent, active-border, muted and background variables. **Glacier Light** uses different blending to preserve a pale base, while dark palettes have vivid, saturated fluid clouds.
-
-The canvas remains behind the form and is `pointer-events:none`; the containing login screen listens passively to pointer movement so users can still focus and submit the form. The effect runs only on login pages and never replaces the separate **non-interactive** signed-in dashboard animation. It stops after sign-in, on tab hiding and for **Reduce Motion**. The fallback on devices without usable WebGL2/float render targets is the static theme-based CSS gradient rather than a blank or black screen.
-
-Performance limits: the simulation renders at around 30 FPS, caps display DPR at 1.25, uses low-resolution velocity/pressure buffers and moderate pressure iterations. No external script service, image downloads, or new environment variables are required.
-
-Implementation: [`server/Inventory.Api/wwwroot/assets/login-fluid.js`](../server/Inventory.Api/wwwroot/assets/login-fluid.js); markup and theme binding remain in [`index.html`](../server/Inventory.Api/wwwroot/index.html).
-
-**Visual QA remains necessary:** compare dragging trajectories, pressure displacement, color density, and cloud diffusion against the chosen Wallpaper Engine references in real desktop browsers. Verify all ten palettes, Glacier Light, touch and mouse behavior, first-load appearance, form usability, reduced motion and GPU fallback.
+QA: check desktop mouse movement over the background, pointer movement over the login card, touch interaction, sign-out/relogin lifecycle, tab visibility, reduced-motion preferences, all ten themes, and low-performance mobile devices. Verify that forms, browser autofill, and submit buttons remain usable.
 
 ## Animated signed-in background
 
