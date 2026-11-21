@@ -257,6 +257,8 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
  .brand-wordmark-mobile{width:132px}
  .mobile-account-actions{max-width:120px;gap:5px}
 }
+.access-action-buttons{display:flex;flex-wrap:wrap;gap:10px}.access-action-buttons .btn{min-width:140px}
+@media(max-width:760px){.access-action-buttons .btn{flex:1 1 140px}}
 </style></head><body>
 <div id="auth" class="login-screen"><div class="card login-card"><div class="brand brand-login"><img class="brand-wordmark brand-wordmark-login" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async" fetchpriority="high"></div><div id="setup" class="hidden"><h1>Set up your inventory</h1><p>Enter the one-time installation token, then create a six-digit PIN.</p><form id="setupForm"><label for="setupToken">Installation token</label><input id="setupToken" required autocomplete="off"><label for="newPin">New PIN</label><input id="newPin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><label for="confirmPin">Confirm PIN</label><input id="confirmPin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><button class="btn primary">Create PIN</button></form></div><div id="employeeLogin" class="hidden"><h1>Employee sign in</h1><p>Enter your employee ID to access your assigned store.</p><form id="employeeForm"><label for="employeeId">Employee ID</label><input id="employeeId" required autocomplete="off"><button class="btn primary">Access inventory</button></form><p style="margin-top:20px"><button class="btn ghost" id="adminLoginBtn">Administrator access</button></p></div><div id="login" class="hidden"><h1>Welcome back</h1><p>Enter your six-digit PIN to access your inventory.</p><form id="loginForm"><label for="adminEmployeeId">Administrator Employee ID</label><input id="adminEmployeeId" autocomplete="off" placeholder="OWNER" value="OWNER" required><label for="pin">Access PIN</label><input id="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="off" autofocus><button class="btn primary">Unlock administration</button></form><p style="margin-top:18px"><button type="button" class="btn ghost" id="employeeLoginBtn">Employee login</button></p></div><div id="authLoading" class="muted" style="padding:12px 0" role="status">Connecting to the inventory server…</div><div id="authMsg" class="message" role="status" aria-live="polite"></div></div></div>
 <div id="app" class="shell hidden"><aside class="sidebar"><div class="brand brand-sidebar"><img class="brand-wordmark brand-wordmark-sidebar" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async"><div id="locationBrand" class="brand-location">Store location</div></div><nav class="nav" id="sideNav" aria-label="Main navigation"><button data-page="overview" class="active"><span>▦</span> Overview</button><button data-page="inventory"><span>▤</span> Inventory</button><button data-page="checkin"><span>↙</span> Check In</button><button data-page="checkout"><span>↗</span> Check Out</button><button data-page="history"><span>◷</span> History</button><button data-page="settings"><span>⚙</span> Settings</button><button data-page="administration" id="adminNav" class="hidden"><span>♙</span> Administration</button></nav><div class="sidebar-foot"><div style="color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">Signed in as</div><div id="signedInEmployee" style="font-size:15px;font-weight:700;color:#f0f2f5;overflow-wrap:anywhere;margin-top:4px">—</div><div id="signedInEmployeeId" style="margin-top:3px">—</div><button type="button" class="btn warn" id="sidebarLogoutBtn" style="width:100%;margin-top:12px">Sign out</button><div id="idleCountdown" style="margin-top:8px;font-size:11px" aria-live="off">Auto sign-out after 30s inactivity</div><div style="margin-top:16px">ZAGG Inventory Manager · Secure inventory access</div></div></aside>
@@ -329,7 +331,7 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
   <form id="employeeCreateForm" class="admin-form"><div class="form-grid"><div><label for="empStore">Primary location</label><select id="empStore" required></select></div><div><label for="empId">Employee ID</label><input id="empId" required placeholder="1042"></div><div class="span2"><label for="empName">Employee name</label><input id="empName" required placeholder="First and last name"></div></div><button class="btn primary">Create employee</button></form>
  </details>
  <details id="grantAccessDetails" class="admin-section"><summary>＋ Give an employee access to another location</summary>
-  <form id="assignStoreForm" class="admin-form"><div class="form-grid"><div><label for="grantEmployee">Employee</label><select id="grantEmployee" required></select></div><div><label for="grantStore">Additional location</label><select id="grantStore" required></select></div></div><button class="btn primary">Grant access</button></form>
+  <form id="assignStoreForm" class="admin-form"><div class="form-grid"><div><label for="grantEmployee">Employee</label><select id="grantEmployee" required></select></div><div><label for="grantStore">Store location</label><select id="grantStore" required></select></div></div><p id="accessActionHint" class="muted" role="status" aria-live="polite" style="font-size:12px;margin-top:10px">Select an employee and location to manage store access.</p><div class="admin-tools access-action-buttons" style="margin-top:14px"><button class="btn primary" id="grantStoreAccessBtn" type="submit">Grant access</button><button class="btn warn" id="removeStoreAccessBtn" type="button" disabled>Remove access</button></div></form>
  </details>
  <details id="accessDetails" class="admin-section"><summary>View employee store assignments</summary><div id="accessList" style="margin-top:12px"></div></details>
 </section>
@@ -715,6 +717,7 @@ async function loadAdmin(){
   const employeeOptions=employees.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+' ('+esc(x.id)+')</option>').join('');
   for(const id of ['empStore','grantStore']){const el=$(id),value=el.value;el.innerHTML='<option value="" disabled selected>Select location</option>'+storeOptions;if(stores.some(x=>x.id===value))el.value=value;}
   {const el=$('grantEmployee'),value=el.value;el.innerHTML='<option value="" disabled selected>Select employee</option>'+employeeOptions;if(employees.some(x=>x.id===value))el.value=value;}
+  updateAccessActionState();
   $('createStoreDetails').classList.toggle('hidden',!identity.isGlobalAdmin);
 
   $('storeForm').classList.toggle('hidden',!identity.isGlobalAdmin);
@@ -748,7 +751,53 @@ $('permissionsForm').onsubmit=async e=>{
   toast('Permissions updated');await loadAdmin();
  }catch(err){toast(err.message,true)}
 };
-$('assignStoreForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/employees/'+encodeURIComponent($('grantEmployee').value.trim())+'/stores','POST',{storeId:$('grantStore').value.trim()});e.target.reset();$('grantAccessDetails').open=false;toast('Store access granted');loadAdmin()}catch(err){toast(err.message,true)}};
+function updateAccessActionState(){
+ const employeeId=$('grantEmployee').value,storeId=$('grantStore').value;
+ const employee=adminEmployees.find(x=>x.id===employeeId);
+ const store=adminStores.find(x=>x.id===storeId);
+ const assigned=adminAccess.some(x=>x.employeeId===employeeId&&x.storeId===storeId);
+ const protectedPrimary=!!employee&&employee.storeId===storeId;
+ const protectedAdmin=!!employee?.globalAdmin&&!identity?.isGlobalAdmin;
+ const protectedSelf=employeeId===identity?.employeeId&&!identity?.isGlobalAdmin;
+ const canRemove=!!employee&&!!store&&assigned&&!protectedPrimary&&!protectedAdmin&&!protectedSelf;
+ $('removeStoreAccessBtn').disabled=!canRemove;
+ $('grantStoreAccessBtn').disabled=!employee||!store||assigned;
+ $('accessActionHint').textContent=!employee||!store
+  ?'Select an employee and location to manage store access.'
+  :protectedPrimary?'This is the employee’s primary store. Primary store access cannot be removed.'
+  :protectedAdmin||protectedSelf?'This access assignment cannot be changed from your administrator account.'
+  :assigned?'Access is currently granted to this location. Select Remove access to revoke it.'
+  :'This employee does not have access to the selected location.';
+}
+$('grantEmployee').addEventListener('change',updateAccessActionState);
+$('grantStore').addEventListener('change',updateAccessActionState);
+$('assignStoreForm').onsubmit=async e=>{
+ e.preventDefault();
+ const employeeId=$('grantEmployee').value.trim(),storeId=$('grantStore').value.trim();
+ if(!employeeId||!storeId)return;
+ const button=$('grantStoreAccessBtn');
+ button.disabled=true;
+ try{
+  await api('admin/employees/'+encodeURIComponent(employeeId)+'/stores','POST',{storeId});
+  toast('Store access granted');
+  await loadAdmin();
+ }catch(err){toast('Unable to grant access: '+err.message,true)}
+ finally{updateAccessActionState()}
+};
+$('removeStoreAccessBtn').onclick=async()=>{
+ const employeeId=$('grantEmployee').value.trim(),storeId=$('grantStore').value.trim();
+ const employee=adminEmployees.find(x=>x.id===employeeId),store=adminStores.find(x=>x.id===storeId);
+ if(!employee||!store||employee.storeId===storeId||!adminAccess.some(x=>x.employeeId===employeeId&&x.storeId===storeId))return;
+ if(!confirm('Remove '+employee.name+' ('+employeeId+') from '+store.name+' ('+storeId+')?\\n\\nThey will no longer be able to access this location. Their primary store and other locations will remain unchanged.'))return;
+ const button=$('removeStoreAccessBtn');
+ button.disabled=true;
+ try{
+  await api('admin/employees/'+encodeURIComponent(employeeId)+'/stores/'+encodeURIComponent(storeId),'DELETE');
+  toast('Store access removed');
+  await loadAdmin();
+ }catch(err){toast('Unable to remove access: '+err.message,true)}
+ finally{updateAccessActionState()}
+};
 $('storesList').onclick=e=>{
  const btn=e.target.closest('[data-edit-store]');if(!btn||!identity?.isGlobalAdmin)return;
  const existing=adminStores.find(store=>store.id===btn.dataset.editStore);
