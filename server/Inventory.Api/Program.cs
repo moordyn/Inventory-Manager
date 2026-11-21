@@ -217,7 +217,7 @@ app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreReques
 app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();
     await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT primary_store_id,id,name,active,global_admin FROM employees WHERE @global OR id IN(SELECT employee_id FROM employee_store_access WHERE store_id=@store) ORDER BY primary_store_id,id",c);
-    cmd.Parameters.AddWithValue("global",who.Value.globalAdmin);cmd.Parameters.AddWithValue("store",who.Value.store);cmd.Parameters.AddWithValue("global",who.Value.globalAdmin);cmd.Parameters.AddWithValue("store",who.Value.store);await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
+    cmd.Parameters.AddWithValue("global",who.Value.globalAdmin);cmd.Parameters.AddWithValue("store",who.Value.store);await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
     while(await r.ReadAsync())list.Add(new{storeId=r.GetString(0),id=r.GetString(1),name=r.GetString(2),active=r.GetBoolean(3),globalAdmin=r.GetBoolean(4)});
     return Results.Ok(list);
 });
@@ -242,9 +242,10 @@ app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,
     await cmd.ExecuteNonQueryAsync();return Results.Ok(new{assigned=true});
 });
 app.MapGet("/api/admin/employee-access",async (HttpContext ctx)=>{
-    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();if(!who.Value.admin)return Results.Forbid();
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT employee_id,store_id,role FROM employee_store_access WHERE @global OR store_id=@store ORDER BY employee_id,store_id",c);
+    cmd.Parameters.AddWithValue("global",who.Value.globalAdmin);cmd.Parameters.AddWithValue("store",who.Value.store);
     await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
     while(await r.ReadAsync())list.Add(new{employeeId=r.GetString(0),storeId=r.GetString(1),role=r.GetString(2)});
     return Results.Ok(list);
