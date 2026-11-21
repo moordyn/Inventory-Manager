@@ -1,5 +1,9 @@
 # Repair Queue
 
+## Overview dashboard
+
+The Overview page includes a live, store-specific **Repair Queue** card showing active ticket count, number currently In Progress, number awaiting pickup (Ready for Pickup or Completed), and the sum of outstanding balances. It previews the **oldest four open tickets** with device, repair type, check-in time, employee, status, quoted total, deposit and balance. **Open ticket** opens its details directly; **View all repairs** opens the full queue. The dashboard refreshes with normal inventory synchronization and after repair updates. It uses the selected theme and adapts to mobile layouts.
+
 The **Repair Queue** page tracks device repairs separately from inventory receiving and checkout. The queue shows active tickets oldest check-in first, with ticket number, who checked it in, device, repair type, total quote, upfront payment, outstanding balance, technician, and the number of consumed parts. Completed repairs remain in the active queue until paid/picked up; paid/picked-up and cancelled repairs remain in a separate history view.
 
 ## Check in a repair
