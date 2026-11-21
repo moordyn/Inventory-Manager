@@ -140,6 +140,10 @@ jobs:
           if (!backend.includes('m.delta<0') || !backend.includes('req.ExpectedRevision!=revision')) {
             throw new Error('Checkout-only note editing / optimistic concurrency checks missing');
           }
+          if (!html.includes('return !!identity&&Number(entry.delta)<0') ||
+              !backend.includes('Any active employee who can access this store may annotate its checkout history.')) {
+            throw new Error('Store employees must be able to edit checkout notes across all checkout authors');
+          }
           console.log('Frontend, branding, scanner, reporting, audit and checkout note editing checks passed');
           NODE
 
