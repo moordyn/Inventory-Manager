@@ -486,8 +486,8 @@ const money=x=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',ma
 const time=x=>new Date(x).toLocaleString();
 const toast=(message,error=false)=>{const el=$('toast');el.textContent=message;el.className='toast'+(error?' error':'');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.add('hidden'),4500)};
 async function api(path,method='GET',data){const response=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(data!==undefined?{body:JSON.stringify(data)}:{})});if(!response.ok){let text=await response.text();if(response.status===401&&token){logout(false)}if(response.status===429){let seconds=Number(response.headers.get('Retry-After'));try{const data=JSON.parse(text);if(Number.isFinite(Number(data.retryAfterSeconds)))seconds=Number(data.retryAfterSeconds)}catch{}throw Error(seconds>0?'Too many failed sign-ins. Try again in '+Math.floor(Math.ceil(seconds)/60)+' min '+(Math.ceil(seconds)%60)+' sec.':'Too many failed attempts. Try again shortly.')}throw Error(text.slice(0,220)||('HTTP '+response.status+' — check API logs'))}return response.status===204?null:response.json()}
-function authScreen(which){$('auth').classList.remove('hidden');$('app').classList.add('hidden');$('authLoading').classList.add('hidden');$('authMsg').textContent='';for(const name of ['setup','login','employeeLogin'])$(name).classList.toggle('hidden',name!==which)}
-async function enter(){try{identity=await api('auth/me');$('signedInEmployee').textContent=identity.employeeName||identity.employeeId;$('signedInEmployeeId').textContent='Employee ID: '+identity.employeeId;$('mobileEmployeeName').textContent=identity.employeeName||identity.employeeId;allowedStores=identity.isGlobalAdmin?await api('admin/stores'):await api('auth/stores');$('adminNav').classList.toggle('hidden',!identity.isAdmin);$('mobileAdminNav').classList.toggle('hidden',!identity.isAdmin);$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;renderStorePicker();updateLocationBrand();navigate('overview');startIdleTimer();await load();
+function authScreen(which){$('auth').classList.remove('hidden');$('app').classList.add('hidden');$('authLoading').classList.add('hidden');$('authMsg').textContent='';for(const name of ['setup','employeeLogin','register','forgot','authTokenView'])$(name).classList.toggle('hidden',name!==which)}
+async function enter(){try{identity=await api('auth/me');$('signedInEmployee').textContent=identity.employeeName||identity.employeeId;$('signedInEmployeeId').textContent='Employee ID: '+identity.employeeId;$('accountEmailStatus').textContent=identity.emailVerified?'Verified email: '+(identity.email||'—'):'Email not verified: '+(identity.email||'—')+'. Connect the global mail sender and request verification below.';$('sendMyVerificationBtn').classList.toggle('hidden',!!identity.emailVerified);$('mobileEmployeeName').textContent=identity.employeeName||identity.employeeId;allowedStores=identity.isGlobalAdmin?await api('admin/stores'):await api('auth/stores');$('adminNav').classList.toggle('hidden',!identity.isAdmin);$('mobileAdminNav').classList.toggle('hidden',!identity.isAdmin);$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;renderStorePicker();updateLocationBrand();navigate('overview');startIdleTimer();await load();
  const googleReturn=new URLSearchParams(location.search).get('google');
  if(googleReturn){
    window.history.replaceState(null,'',location.pathname+location.hash);
@@ -502,40 +502,148 @@ async function enter(){try{identity=await api('auth/me');$('signedInEmployee').t
    if(!identity){logout(false);$('authMsg').textContent='Could not verify your session. Please sign in again.'}
    else{toast('Dashboard error: '+(e?.message||String(e)),true)}
  }}
-const IDLE_LIMIT_MS=30000;
-let lastUserActivity=Date.now(),idleTimer=null;
-function resetIdleTimer(){if(!token||$('app').classList.contains('hidden'))return;lastUserActivity=Date.now();}
+// Silent 15-minute inactivity logout. Background refreshes do not count as user activity.
+const IDLE_LIMIT_MS=15*60*1000;
+let lastUserActivity=Date.now(),idleTimer=null,lastActivityHeartbeat=Date.now();
+let authLinkToken='',authLinkPurpose='';
+function validNewPassword(value){
+ return value.length>=8&&/[A-Z]/.test(value)&&/[a-z]/.test(value)&&/[0-9]/.test(value)&&/[^A-Za-z0-9]/.test(value);
+}
+function resetIdleTimer(){
+ if(!token||$('app').classList.contains('hidden'))return;
+ const now=Date.now();
+ if(now-lastUserActivity>=IDLE_LIMIT_MS){logout(false);return;}
+ lastUserActivity=now;
+ if(now-lastActivityHeartbeat>=30000){
+   lastActivityHeartbeat=now;
+   api('auth/activity','POST').catch(err=>{if(token)toast('Unable to extend your session: '+err.message,true)});
+ }
+}
 function startIdleTimer(){
- lastUserActivity=Date.now();
+ lastUserActivity=Date.now();lastActivityHeartbeat=Date.now();
  if(idleTimer!==null)clearInterval(idleTimer);
  idleTimer=setInterval(()=>{
    if(!token||$('app').classList.contains('hidden'))return;
-   const remaining=IDLE_LIMIT_MS-(Date.now()-lastUserActivity);
-   if(remaining<=0){logout();return;}
-   $('idleCountdown').textContent='Auto sign-out in '+Math.ceil(remaining/1000)+'s';$('mobileIdleCountdown').textContent=Math.ceil(remaining/1000)+'s until sign-out';
- },500);
- $('idleCountdown').textContent='Auto sign-out in 30s';$('mobileIdleCountdown').textContent='30s until sign-out';
+   if(Date.now()-lastUserActivity>=IDLE_LIMIT_MS)logout();
+ },5000);
 }
 for(const eventName of ['pointerdown','pointermove','keydown','touchstart','wheel','scroll']){
  document.addEventListener(eventName,event=>{if(event.isTrusted)resetIdleTimer()},{passive:true});
 }
 document.addEventListener('visibilitychange',()=>{
  if(document.hidden&&activeScannerStop)closeModal();
- if(!document.hidden&&token&&!$('app').classList.contains('hidden')&&Date.now()-lastUserActivity>=IDLE_LIMIT_MS)logout();
+ if(!document.hidden&&token&&!$('app').classList.contains('hidden')&&Date.now()-lastUserActivity>=IDLE_LIMIT_MS)logout(false);
 });
 function logout(send=true){
  if($('modalRoot').firstElementChild)closeModal();
  if(idleTimer!==null){clearInterval(idleTimer);idleTimer=null;}
  if(send&&token)api('auth/logout','POST').catch(()=>{});
- token='';identity=null;allowedStores=[];items=[];history=[];productHistoryRows=[];activeProductHistoryItemId=null;reorderRows=[];$('recentHistory').innerHTML='';$('historyTable').innerHTML='';
+ token='';identity=null;allowedStores=[];items=[];history=[];productHistoryRows=[];activeProductHistoryItemId=null;reorderRows=[];
+ $('recentHistory').innerHTML='';$('historyTable').innerHTML='';
  sessionStorage.removeItem('inventory-token');
  $('app').classList.add('hidden');$('auth').classList.remove('hidden');
- $('signedInEmployee').textContent='—';$('signedInEmployeeId').textContent='—';$('mobileEmployeeName').textContent='Employee';$('mobileIdleCountdown').textContent='';
+ $('signedInEmployee').textContent='—';$('signedInEmployeeId').textContent='—';$('mobileEmployeeName').textContent='Employee';
  authScreen('employeeLogin');
 }
-async function initialize(){try{const state=await api('auth/status');if(!state.initialized)authScreen('setup');else if(token)await enter();else authScreen('employeeLogin')}catch(e){$('authLoading').classList.add('hidden');$('authMsg').textContent='Unable to connect to server: '+e.message}}
-$('setupForm').onsubmit=async e=>{e.preventDefault();try{await api('auth/setup','POST',{setupToken:$('setupToken').value,pin:$('newPin').value,confirmPin:$('confirmPin').value});$('authMsg').textContent='PIN created. Sign in below.';authScreen('employeeLogin')}catch(err){$('authMsg').textContent=err.message}};
-$('loginForm').onsubmit=async e=>{e.preventDefault();try{token=(await api('auth/login','POST',{pin:$('pin').value,employeeId:$('adminEmployeeId').value.trim()})).token;sessionStorage.setItem('inventory-token',token);$('pin').value='';$('authMsg').textContent='';enter()}catch(err){$('authMsg').textContent='Unable to sign in. '+err.message}};
+async function loadAuthEmailToken(raw){
+ authScreen('authTokenView');authLinkToken=raw;authLinkPurpose='';
+ $('authTokenForm').classList.add('hidden');
+ $('authTokenHint').textContent='Checking your email verification link…';
+ try{
+  const info=await api('auth/token-info','POST',{token:raw});
+  authLinkPurpose=info.purpose;
+  $('authTokenTitle').textContent=info.purpose==='reset'?'Reset your password':info.purpose==='verify'?'Verify your email':'Activate your employee account';
+  $('authTokenHint').textContent='Employee ID: '+info.employeeId+'. '+(info.purpose==='reset'?'Enter and confirm a new password.':'Select the button below to confirm ownership of this email address.');
+  $('resetPasswordFields').classList.toggle('hidden',info.purpose!=='reset');
+  $('resetPassword').required=info.purpose==='reset';
+  $('resetPasswordConfirm').required=info.purpose==='reset';
+  $('completeAuthTokenBtn').textContent=info.purpose==='reset'?'Reset password':'Verify and activate';
+  $('authTokenForm').classList.remove('hidden');
+ }catch(err){authLinkToken='';$('authTokenHint').textContent=err.message;}
+}
+async function initialize(){
+ try{
+  const query=new URLSearchParams(location.search);
+  const emailedToken=query.get('authToken');
+  if(emailedToken){
+   query.delete('authToken');
+   history.replaceState(null,'',location.pathname+(query.toString()?'?'+query.toString():'')+location.hash);
+   await loadAuthEmailToken(emailedToken);
+   return;
+  }
+  const state=await api('auth/status');
+  if(!state.initialized)authScreen('setup');
+  else if(token)await enter();
+  else authScreen('employeeLogin');
+ }catch(e){$('authLoading').classList.add('hidden');$('authMsg').textContent='Unable to connect to server: '+e.message}
+}
+$('setupForm').onsubmit=async e=>{
+ e.preventDefault();
+ const email=$('ownerEmail').value.trim(),confirmEmail=$('ownerEmailConfirm').value.trim(),password=$('ownerPassword').value,confirmPassword=$('ownerPasswordConfirm').value;
+ if(email.toLowerCase()!==confirmEmail.toLowerCase()){ $('authMsg').textContent='Email addresses do not match.';return;}
+ if(password!==confirmPassword||!validNewPassword(password)){ $('authMsg').textContent='Password must match and contain 8+ characters, uppercase, lowercase, a number and a symbol.';return;}
+ try{
+  await api('auth/setup','POST',{setupToken:$('setupToken').value.trim(),email,confirmEmail,password,confirmPassword});
+  $('setupForm').reset();authScreen('employeeLogin');$('employeeId').value='OWNER';
+  $('authMsg').textContent='Administrator account created. Sign in with your password, then configure Gmail and verify your email in Settings.';
+ }catch(err){$('authMsg').textContent=err.message;}
+};
+$('employeeForm').onsubmit=async e=>{
+ e.preventDefault();const employeeId=$('employeeId').value.trim();
+ try{
+  token=(await api('auth/employee-login','POST',{employeeId,password:$('employeePassword').value})).token;
+  sessionStorage.setItem('inventory-token',token);$('employeePassword').value='';$('authMsg').textContent='';await enter();
+ }catch(err){
+  let setupRequired=false;
+  try{setupRequired=!!JSON.parse(err.message).setupRequired}catch{}
+  if(setupRequired){
+   authScreen('register');$('regEmployeeId').value=employeeId;
+   $('authMsg').textContent='This account needs first-time email verification. Complete the form to activate it.';
+  }else $('authMsg').textContent='Unable to sign in. Check your employee ID and password.';
+ }
+};
+$('firstTimeSetupBtn').onclick=()=>{const id=$('employeeId').value.trim();authScreen('register');$('regEmployeeId').value=id;};
+$('forgotPasswordBtn').onclick=()=>{const id=$('employeeId').value.trim();authScreen('forgot');$('forgotEmployeeId').value=id;};
+document.querySelectorAll('[data-back-to-signin]').forEach(button=>button.onclick=()=>{authLinkToken='';authScreen('employeeLogin')});
+$('registrationForm').onsubmit=async e=>{
+ e.preventDefault();
+ const employeeId=$('regEmployeeId').value.trim(),email=$('regEmail').value.trim(),confirmEmail=$('regConfirmEmail').value.trim();
+ const password=$('regPassword').value,confirmPassword=$('regConfirmPassword').value;
+ if(email.toLowerCase()!==confirmEmail.toLowerCase()){ $('authMsg').textContent='Email addresses must match.';return;}
+ if(password!==confirmPassword||!validNewPassword(password)){ $('authMsg').textContent='Password must match and contain 8+ characters, uppercase, lowercase, a number and a symbol.';return;}
+ try{
+  await api('auth/start-activation','POST',{employeeId,email,confirmEmail,password,confirmPassword});
+  $('registrationForm').reset();authScreen('employeeLogin');$('employeeId').value=employeeId;
+  $('authMsg').textContent='Verification email sent. Open the link in your inbox to activate your account, then sign in.';
+ }catch(err){ $('authMsg').textContent=err.message; }
+};
+$('forgotForm').onsubmit=async e=>{
+ e.preventDefault();
+ try{
+  const data=await api('auth/forgot-password','POST',{employeeId:$('forgotEmployeeId').value.trim()});
+  $('forgotForm').reset();authScreen('employeeLogin');$('authMsg').textContent=data.message;
+ }catch(err){$('authMsg').textContent=err.message}
+};
+$('authTokenForm').onsubmit=async e=>{
+ e.preventDefault();
+ if(!authLinkToken)return;
+ const password=authLinkPurpose==='reset'?$('resetPassword').value:null;
+ const confirmPassword=authLinkPurpose==='reset'?$('resetPasswordConfirm').value:null;
+ if(authLinkPurpose==='reset'&&(password!==confirmPassword||!validNewPassword(password))){
+  $('authMsg').textContent='Passwords must match and contain 8+ characters, uppercase, lowercase, a number and a symbol.';return;
+ }
+ try{
+  const result=await api('auth/complete-token','POST',{token:authLinkToken,password,confirmPassword});
+  authLinkToken='';$('authTokenForm').reset();authScreen('employeeLogin');
+  $('authMsg').textContent=result.message||'Your account is ready. Sign in with your password.';
+ }catch(err){$('authMsg').textContent=err.message;}
+};
+$('sendMyVerificationBtn').onclick=async()=>{
+ const button=$('sendMyVerificationBtn');button.disabled=true;
+ try{await api('auth/send-verification','POST');toast('Email verification link sent. Check your inbox.');}
+ catch(err){toast('Could not send verification: '+err.message,true)}
+ finally{button.disabled=false}
+};
 function navigate(next){
  if(next==='administration'&&!identity?.isAdmin)return;
  if(activeScannerStop)closeModal();
@@ -995,9 +1103,7 @@ $('cameraBtn').onclick=async()=>{
    toast('Camera unavailable: '+(err?.message||'Check your camera permissions.'),true);
  }
 };
-$('adminLoginBtn').onclick=()=>authScreen('login');
-$('employeeLoginBtn').onclick=()=>authScreen('employeeLogin');
-$('employeeForm').onsubmit=async e=>{e.preventDefault();try{token=(await api('auth/employee-login','POST',{employeeId:$('employeeId').value.trim()})).token;sessionStorage.setItem('inventory-token',token);$('authMsg').textContent='';await enter()}catch(err){$('authMsg').textContent='Unable to sign in: '+err.message}};
+// Employee password login and first-time setup handlers are registered by the auth module above.
 
 function updateLocationBrand(){
  const current=allowedStores.find(x=>x.id===identity?.storeId);
@@ -1040,17 +1146,17 @@ async function loadGlobalGoogleConfig(){
 $('googleOAuthImportForm').onsubmit=async e=>{
  e.preventDefault();
  if(!identity?.isGlobalAdmin)return;
- const file=$('googleOAuthFile').files?.[0],pin=$('googleOAuthPin').value,button=$('googleOAuthImportBtn');
+ const file=$('googleOAuthFile').files?.[0],password=$('googleOAuthPassword').value,button=$('googleOAuthImportBtn');
  if(!file){toast('Choose your Google OAuth JSON file.',true);return}
  if(file.size>24576){toast('Google OAuth JSON must be smaller than 24 KB.',true);return}
  button.disabled=true;button.textContent='Importing…';
  try{
   const contents=await file.text();
-  await api('admin/google-oauth/import','POST',{json:contents,pin});
-  $('googleOAuthFile').value='';$('googleOAuthPin').value='';
+  await api('admin/google-oauth/import','POST',{json:contents,password});
+  $('googleOAuthFile').value='';$('googleOAuthPassword').value='';
   toast('Google OAuth configured. Connect the global Gmail sender below.');
   await Promise.all([loadGlobalGoogleConfig(),loadAlertSettings()]);
- }catch(err){$('googleOAuthPin').value='';toast('Import failed: '+err.message,true)}
+ }catch(err){$('googleOAuthPassword').value='';toast('Import failed: '+err.message,true)}
  finally{button.disabled=false;button.textContent='Import Google configuration'}
 };
 $('connectGlobalGoogleBtn').onclick=async()=>{
