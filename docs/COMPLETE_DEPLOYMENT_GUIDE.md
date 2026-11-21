@@ -40,11 +40,11 @@ A root domain (e.g. `https://example.com`) is equally valid: set `PUBLIC_ORIGIN=
 
 1. [What this deployment consists of](#1-what-this-deployment-consists-of)
 2. [Record installation information](#2-record-installation-information)
-3. [Prerequisites and Proxmox preparation](#3-prerequisites-and-proxmox-preparation)
+3. [Prerequisites and Ubuntu/Proxmox preparation](#3-prerequisites-and-ubuntuproxmox-preparation)
 4. [Install Inventory Manager from scratch](#4-install-inventory-manager-from-scratch)
 5. [Initial admin PIN and store onboarding](#5-initial-admin-pin-and-store-onboarding)
 6. [Choose DNS and configure optional Cloudflare/OPNsense DDNS](#6-choose-dns-and-configure-optional-cloudflareopnsense-ddns)
-7. [Router rules and Nginx Proxy Manager](#7-router-rules-and-nginx-proxy-manager)
+7. [Router rules and an HTTPS reverse proxy](#7-router-rules-and-an-https-reverse-proxy)
 8. [HTTPS, certificates and optional Cloudflare proxy](#8-https-certificates-and-optional-cloudflare-proxy)
 9. [Google Cloud OAuth and Gmail API](#9-google-cloud-oauth-and-gmail-api)
 10. [Connect the global Gmail sender and configure alerts](#10-connect-the-global-gmail-sender-and-configure-alerts)
@@ -941,18 +941,18 @@ If you are upgrading an earlier installation that had its origin embedded in cod
 
 | Symptom | Likely causes | Check / action |
 | --- | --- | --- |
-| Installer refuses to run | Wrong Ubuntu version, not root, dirty Git working tree, nonempty target directory | <code>cat /etc/os-release</code>; <code>id</code>; <code>git status --short</code>; inspect before editing |
+| Installer refuses to run | Wrong Ubuntu version, not root, dirty checkout, nonempty path **or missing/invalid PUBLIC_ORIGIN on a new installation** | Check <code>cat /etc/os-release</code>, <code>id</code>, <code>git status --short</code>; for unattended installs set <code>PUBLIC_ORIGIN=https://YOUR_REAL_DOMAIN</code> |
 | Docker/Compose unavailable | Docker-in-LXC limitations, apt/repo error, nesting issue | <code>docker info</code>; <code>docker compose version</code>; <code>journalctl -u docker</code>; review LXC features |
-| API shows 502 or does not load | Container down, database unhealthy, wrong upstream IP/port | Compose <code>ps</code>, API/db logs, LAN <code>curl .../health</code>, NPM target |
-| Local LAN works but public domain fails | DNS, DDNS, WAN NAT, double NAT, CGNAT, NPM firewall | Cloudflare record content, OPNsense DDNS logs, WAN routing, external LTE test |
+| API shows 502 or does not load | Container down, database unhealthy, wrong upstream IP/port | Compose <code>ps</code>, API/db logs, LAN <code>curl .../health</code>, reverse-proxy upstream |
+| Local LAN works but public domain fails | DNS, optional DDNS, WAN NAT, double NAT, CGNAT, HTTPS proxy/firewall | Verify your chosen DNS provider's A/AAAA record or tunnel, firewall/NAT, proxy, external cellular network; Cloudflare/OPNsense logs only if used |
 | Cloudflare 522 timeout | Origin unreachable/blocked/incorrect port forwarding | NPM reachability, firewall, WAN address, upstream NAT |
 | Cloudflare 525 / 526 | TLS handshake failure or bad origin certificate | NPM SSL cert covers domain, Cloudflare Full (strict), renewed/not expired cert |
-| Wrong app/site appears | NPM host points to other service or conflicting proxy host | Verify exact NPM proxy host and domain |
-| Site redirects repeatedly | Incompatible SSL mode, proxy HTTPS redirect conflict | Full (strict) with valid origin cert; remove competing redirect rules |
+| Wrong app/site appears | Reverse proxy's hostname routed to wrong service | Verify the configured HTTPS proxy host and exact site FQDN |
+| Site redirects repeatedly | Proxy HTTPS redirect conflict or incompatible CDN SSL mode | Verify matching certificate and HTTPS redirects; if Cloudflare proxied use Full (strict) |
 | Cloudflare DNS shows another IP | Wrong DDNS zone/hostname/public-IP detection | OPNsense DDNS account and Cloudflare dashboard (not public dig for proxied records) |
 | No initial PIN setup screen | Database already enrolled | <code>/api/auth/status</code>; existing PIN remains; installer is not PIN reset |
-| Google JSON import rejected | Old downloaded JSON, wrong OAuth client type, mismatch origin/callback, missing key | Re-save Google origin/callback and re-download Web client JSON; confirm <code>GOOGLE_TOKEN_KEY</code> |
-| Google <code>redirect_uri_mismatch</code> | Wrong domain/HTTPS/path, old application build | Check exact callback, Google client and deployed commit |
+| Google JSON import rejected | Wrong client's JSON, invalid Web application type, mismatch with this installation's PUBLIC_ORIGIN/callback, or missing encryption key | Confirm <code>PUBLIC_ORIGIN</code> is **your real hostname**, configure **your own** Google OAuth Web client with matching origin/callback, re-download JSON; verify <code>GOOGLE_TOKEN_KEY</code> |
+| Google <code>redirect_uri_mismatch</code> | `PUBLIC_ORIGIN` differs from OAuth client authorized redirect, extra `www`, old JSON or wrong host | Compare your server's `PUBLIC_ORIGIN` with Google `PUBLIC_ORIGIN + /api/google/callback`, verify installed client and restart |
 | Google connection returns canceled/expired | Consent declined or state timed out | Retry promptly in same browser; verify server clock |
 | Gmail stops after ~7 days | OAuth External app still in Testing | Review Audience/publishing, test users and Google requirements |
 | Global Gmail connected, no alert | Recipients not saved/enabled, no low-stock transition, worker delay, Gmail token issue | Use **Send test email**, app API logs, store alert settings |
@@ -962,7 +962,7 @@ If you are upgrading an earlier installation that had its origin embedded in cod
 | Inventory data disappears | Wrong selected store, incorrect DB volume/project, accidental restore | Stop and investigate; check active store and volume, restore only from verified dump |
 | Backups absent | Timer disabled, db unhealthy, full filesystem, permission failure | <code>systemctl list-timers</code>, journal, manual backup, <code>df -h</code> |
 | API cannot decrypt Gmail token | <code>GOOGLE_TOKEN_KEY</code> missing/changed, mismatched DB/key restore | Restore matching key; avoid random rekeying |
-| After deployment old UI remains | Cache or deployment did not pull latest commit | <code>git rev-parse HEAD</code>, Compose logs, hard refresh, Cloudflare caching rules |
+| After deployment old UI remains | Browser/CDN cache or deployment did not pull latest commit | <code>git rev-parse HEAD</code>, Compose logs, hard refresh, CDN caching rules if used |
 
 ### 16.1 Handy commands
 
@@ -989,8 +989,8 @@ Do **not** include any environment secrets, bearer tokens, PINs, OAuth codes or 
 - [ ] Replace or augment employee-ID-only authentication with real individual authentication, strong credentials/MFA and role enforcement. Audit **store-admin login by employee ID** specifically.
 - [ ] Limit exposure using a VPN / trusted network / identity-aware gateway (e.g., Cloudflare Access where appropriate) until authentication is hardened.
 - [ ] Restrict TCP/18424 to NPM/trusted management LAN; protect NPM admin port 81 and Proxmox/OPNsense management separately.
-- [ ] Monitor TLS/certificate renewals and verify Cloudflare Full (strict).
-- [ ] Protect the Gmail mailbox with strong authentication and transfer Google Cloud project ownership to an accountable business-controlled identity.
+- [ ] Monitor TLS/certificate renewals; if using Cloudflare proxied mode, verify Full (strict).
+- [ ] Protect the sending mailbox with strong authentication and keep Google Cloud project/OAuth credentials under the installing business's accountable administrators.
 - [ ] Define access-offboarding, database retention, incident response, audit-log retention, and approved administrators.
 - [ ] Store and test **encrypted offsite database + .env** backups.
 - [ ] Review log contents, application updates/dependencies, and API authorization boundaries.
@@ -1001,7 +1001,7 @@ Do **not** include any environment secrets, bearer tokens, PINs, OAuth codes or 
 
 For a franchise handover, agree in writing:
 - Whether the business receives a perpetual **license** or a full source-code/IP **assignment**, and exactly which code/brand assets are included.
-- Who owns the domain, registrar, Cloudflare zone, OPNsense, Proxmox, NPM infrastructure and Google Cloud project.
+- Who owns the chosen domain, registrar/DNS provider, router/firewall, application host, HTTPS proxy and the installer's own Google Cloud project.
 - Who pays for hosting, domain renewal, email account, Internet access, offsite backup, SSL services and ongoing upgrades.
 - Who is responsible for bug fixes, feature requests, outages, backups/restores, lost credentials and employee provisioning.
 - Who may grant GitHub repository access and who can approve production deployments.
