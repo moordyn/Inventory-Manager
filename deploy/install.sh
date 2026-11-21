@@ -6,7 +6,7 @@ if [[ ! -f /etc/os-release ]]; then echo "Linux required"; exit 1; fi
 if [[ "$ID" != ubuntu || "$VERSION_ID" != "24.04" ]]; then echo "Designed for Ubuntu 24.04; found $PRETTY_NAME"; exit 1; fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl git openssl
+apt-get install -y ca-certificates curl git openssl python3
 if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
@@ -39,6 +39,10 @@ if [[ ! -f .env ]]; then
   printf 'POSTGRES_PASSWORD=%s\nSETUP_TOKEN=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > .env
 fi
 chmod 600 .env
+# Persist the encryption key across deployments. Never silently rotate an existing key.
+if ! grep -q '^GOOGLE_TOKEN_KEY=' .env; then
+  printf 'GOOGLE_TOKEN_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
+fi
 docker compose --env-file .env -f deploy/compose.yml up -d --build
 install -m 0644 deploy/inventory-backup.service /etc/systemd/system/inventory-backup.service
 install -m 0644 deploy/inventory-backup.timer /etc/systemd/system/inventory-backup.timer
