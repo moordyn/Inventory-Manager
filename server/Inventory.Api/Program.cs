@@ -408,8 +408,23 @@ async Task<bool> CanManageStore(HttpContext ctx,string store){
     return (bool)(await cmd.ExecuteScalarAsync()??false);
 }
 
-const string PublicOrigin="https://zagginventorymanager.com";
-const string GoogleRedirect=PublicOrigin+"/api/google/callback";
+// Canonical external HTTPS origin is configured per installation, never inferred from untrusted Host headers.
+// Use the original production domain only as a compatibility default for pre-PUBLIC_ORIGIN installs.
+var publicOriginText=Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"https://zagginventorymanager.com";
+if(!Uri.TryCreate(publicOriginText,out Uri? publicOriginUri)
+   || publicOriginUri.Scheme!=Uri.UriSchemeHttps
+   || publicOriginUri.HostNameType!=UriHostNameType.Dns
+   || !publicOriginUri.Host.Contains('.')
+   || !string.IsNullOrEmpty(publicOriginUri.UserInfo)
+   || publicOriginUri.AbsolutePath!="/"
+   || !string.IsNullOrEmpty(publicOriginUri.Query)
+   || !string.IsNullOrEmpty(publicOriginUri.Fragment)
+   || !publicOriginUri.IsDefaultPort
+   || publicOriginText.EndsWith("/",StringComparison.Ordinal)
+   || !string.Equals(publicOriginText,publicOriginUri.GetLeftPart(UriPartial.Authority),StringComparison.Ordinal))
+    throw new InvalidOperationException("PUBLIC_ORIGIN must be a canonical HTTPS URL such as https://inventory.example.com (without trailing slash, port, path, query or fragment).");
+var PublicOrigin=publicOriginText;
+var GoogleRedirect=PublicOrigin+"/api/google/callback";
 const string GmailScope="https://www.googleapis.com/auth/gmail.send";
 var googleCredentials=new GoogleOAuthCredentials(Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")??"",Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET")??"");
 var keyText=Environment.GetEnvironmentVariable("GOOGLE_TOKEN_KEY")??"";
