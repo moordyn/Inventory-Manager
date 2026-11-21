@@ -228,3 +228,32 @@ jobs:
           fi
           gh release create v1.0.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'Inventory Manager v1.0.0' --notes-file docs/releases/v1.0.0.md
           gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" --json tagName,url,publishedAt
+
+  # One-time v1.1.0 publication only after all integration/build checks pass.
+  publish_v1_1_0:
+    name: Publish v1.1.0 GitHub Release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-v1.1.0]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm release version and notes
+        run: |
+          test "$(tr -d '\r\n' < VERSION)" = '1.1.0'
+          grep -q '<Version>1.1.0</Version>' server/Inventory.Api/Inventory.Api.csproj
+          test -s docs/releases/v1.1.0.md
+          grep -q '/api/auth/start-activation' server/Inventory.Api/Program.cs
+          grep -q '/api/auth/forgot-password' server/Inventory.Api/Program.cs
+      - name: Create v1.1.0 tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.1.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v1.1.0 already published; refusing to replace the existing release.'
+            exit 0
+          fi
+          gh release create v1.1.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'Inventory Manager v1.1.0' --notes-file docs/releases/v1.1.0.md
+          gh release view v1.1.0 --repo "$GITHUB_REPOSITORY" --json tagName,url,publishedAt
