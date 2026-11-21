@@ -47,13 +47,13 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] With Reduce Motion enabled, motion stops and a static ambient gradient remains.
 - [ ] Large inventories, tall history pages and mobile layouts do not create oversized canvases; scrolling stays responsive.
 
-## Login aurora motion and accessibility
+## Interactive login fluid simulation and accessibility
 
 - [ ] Sign-in, account setup, activation and password-reset views show a soft theme-color ambient animation behind the card.
-- [ ] Moving or dragging the mouse generates fading swishes/clouds without intercepting form clicks or input focus.
-- [ ] Background colors change with the globally configured login palette across all ten themes, including subdued Glacier Light.
+- [ ] Dragging the mouse injects real fluid displacement: colors curl, push surrounding clouds outward and slowly fade. Clicking and typing remain unaffected.
+- [ ] Background **base and fluid** colors change with the global login palette across all ten themes, including a pale background for Glacier Light (no forced black).
 - [ ] The animation stops on successful sign-in, resumes on logout, and pauses when the browser tab is hidden.
-- [ ] Enabling reduced-motion prevents animated rendering and leaves a readable static theme-based background.
+- [ ] Enabling reduced-motion, or disabling WebGL2/float-render-target support, leaves a readable static theme-based background instead of a black/blank screen.
 - [ ] Test on desktop Chrome/Firefox and iOS Safari, including touch, resizing, keyboard-only login and battery/performance behavior.
 
 ## Mobile theme consistency
