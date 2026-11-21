@@ -38,6 +38,15 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] Original owner can rename `OWNER` to a new ID, log back in as that ID, retain global privileges and remain unable to demote the recovery-owner account.
 - [ ] Restart and `/api/auth/status` after an OWNER rename: app remains initialized and does not create a second OWNER account.
 
+## Signed-in ambient animation
+
+- [ ] A subtle, slow animation is visible **behind** main-app content while signed in, without blocking the sidebar, buttons, forms, tables, camera UI or modal dialogs.
+- [ ] Pointer and touch movements do **not** change the signed-in animation; only the login-screen aurora is interactive.
+- [ ] Each personal theme changes the ambient colors immediately, including a restrained light-mode version for Glacier Light.
+- [ ] Animation starts after sign-in, stops on logout and while the tab is hidden, and resumes on return.
+- [ ] With Reduce Motion enabled, motion stops and a static ambient gradient remains.
+- [ ] Large inventories, tall history pages and mobile layouts do not create oversized canvases; scrolling stays responsive.
+
 ## Login aurora motion and accessibility
 
 - [ ] Sign-in, account setup, activation and password-reset views show a soft theme-color ambient animation behind the card.
