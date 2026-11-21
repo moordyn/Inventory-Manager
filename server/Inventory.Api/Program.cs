@@ -62,10 +62,15 @@ app.MapPost("/api/auth/login", async (Login request) =>
     if (stored is null) return Results.Conflict("Initial setup required.");
     var parts = stored.Split(':');
     if (parts.Length != 2 || !Equal(PinHash(request.Pin!, Convert.FromHexString(parts[0])), parts[1])) return Results.Unauthorized();
+    var employeeId=string.IsNullOrWhiteSpace(request.EmployeeId)?"OWNER":request.EmployeeId.Trim();
+    await using(var check=new NpgsqlCommand("SELECT count(*) FROM employees WHERE id=@employee AND active AND global_admin",c)){
+        check.Parameters.AddWithValue("employee",employeeId);
+        if((long)(await check.ExecuteScalarAsync()??0L)!=1)return Results.Unauthorized();
+    }
     var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-    await using var insert = new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) SELECT @h,now()+interval '8 hours',e.primary_store_id,'OWNER',true FROM employees e WHERE e.id='OWNER' ORDER BY e.primary_store_id LIMIT 1", c);
-    insert.Parameters.AddWithValue("h", Hash(token));
-    await insert.ExecuteNonQueryAsync();
+    await using var insert = new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) SELECT @h,now()+interval '8 hours',e.primary_store_id,e.id,true FROM employees e WHERE e.id=@employee AND e.global_admin AND e.active LIMIT 1", c);
+    insert.Parameters.AddWithValue("h", Hash(token));insert.Parameters.AddWithValue("employee",employeeId);
+    if(await insert.ExecuteNonQueryAsync()!=1)return Results.Unauthorized();
     return Results.Ok(new { token });
 }).RequireRateLimiting("auth");
 app.MapPost("/api/auth/logout", async (HttpContext ctx) =>
@@ -409,7 +414,7 @@ await using (var c=await Connect())
 }
 app.Run();
 record Setup(string? SetupToken,string? Pin,string? ConfirmPin);
-record Login(string? Pin);
+record Login(string? Pin,string? EmployeeId=null);
 record NewItem(string Sku,string Name,int Quantity,string? Barcode="",string? Category="",string? Description="",int MinStock=0,decimal? UnitCost=null);
 record MovementRequest(int Delta,string? Note,Guid IdempotencyKey);
 record EditItem(string Sku,string Name,string? Barcode,string? Category,string? Description,int MinStock,decimal? UnitCost);
