@@ -629,6 +629,42 @@ app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>
     await tx.CommitAsync();return Results.Ok(new{created=true});
 });
 
+// Display-name updates do not change stable employee IDs or transaction attribution.
+app.MapPut("/api/admin/employees/{id}/name",async (HttpContext ctx,string id,EmployeeNameRequest req)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!who.Value.admin)return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var name=req.Name?.Trim();
+    if(string.IsNullOrWhiteSpace(name)||name.Length>100||name.Any(char.IsControl))
+        return Results.BadRequest("Employee name must be 1–100 characters without control characters.");
+    await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
+    string oldName;bool targetGlobal,targetStoreAdmin,inCurrentStore;
+    await using(var cmd=new NpgsqlCommand("""
+        SELECT e.name,e.global_admin,
+          EXISTS(SELECT 1 FROM employee_store_access a WHERE a.employee_id=e.id AND a.role='store_admin'),
+          EXISTS(SELECT 1 FROM employee_store_access a WHERE a.employee_id=e.id AND a.store_id=@store)
+        FROM employees e WHERE e.id=@id FOR UPDATE
+        """,c,tx)){
+        cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("store",who.Value.store);
+        await using var reader=await cmd.ExecuteReaderAsync();
+        if(!await reader.ReadAsync())return Results.NotFound("Employee not found.");
+        oldName=reader.GetString(0);targetGlobal=reader.GetBoolean(1);
+        targetStoreAdmin=reader.GetBoolean(2);inCurrentStore=reader.GetBoolean(3);
+    }
+    // Scoped admins may rename themselves or non-admin staff assigned to the current store.
+    if(!who.Value.globalAdmin&&id!=who.Value.employee
+       &&(!inCurrentStore||targetGlobal||targetStoreAdmin))
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if(oldName==name)return Results.Ok(new{updated=false,id,name});
+    await using(var update=new NpgsqlCommand("UPDATE employees SET name=@name WHERE id=@id",c,tx)){
+        update.Parameters.AddWithValue("name",name);update.Parameters.AddWithValue("id",id);
+        await update.ExecuteNonQueryAsync();
+    }
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,
+        who.Value.globalAdmin?null:who.Value.store,"employee.name_changed",id,
+        "Employee display name changed from "+oldName+" to "+name);
+    await tx.CommitAsync();return Results.Ok(new{updated=true,id,name});
+});
+
 app.MapPut("/api/admin/employees/{id}/id",async (HttpContext ctx,string id,ChangeEmployeeId req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -1578,6 +1614,7 @@ record EmployeeLogin(string? EmployeeId,string? Password);
 record SelectStore(string? StoreId);
 record StoreRequest(string? Id,string? Name);
 record EmployeeRequest(string? StoreId,string? Id,string? Name);
+record EmployeeNameRequest(string? Name);
 
 record StoreNameRequest(string? Name);
 record AlertSettingsRequest(bool Enabled,string? Recipients);
