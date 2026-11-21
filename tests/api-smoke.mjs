@@ -45,9 +45,15 @@ assert.equal((await call('auth/me',{token:admin})).body.isGlobalAdmin,true);
 assert.equal((await call('auth/me',{token:admin})).body.emailVerified,false);
 // Five themes are persisted per employee; only global admins choose the public login palette.
 assert.equal((await call('auth/status')).body.loginTheme,'mint');
+for(const theme of ['mint','purple','ocean','ember','rose','slate','forest','gold','crimson','glacier']){
+ await call('auth/theme',{token:admin,method:'PUT',body:{theme},expect:200});
+ assert.equal((await call('auth/me',{token:admin})).body.theme,theme);
+}
 await call('auth/theme',{token:admin,method:'PUT',body:{theme:'invalid'},expect:400});
 await call('auth/theme',{token:admin,method:'PUT',body:{theme:'purple'},expect:200});
 assert.equal((await call('auth/me',{token:admin})).body.theme,'purple');
+await call('admin/theme/login',{token:admin,method:'PUT',body:{theme:'glacier'},expect:200});
+assert.equal((await call('auth/status')).body.loginTheme,'glacier');
 await call('admin/theme/login',{token:admin,method:'PUT',body:{theme:'ocean'},expect:200});
 assert.equal((await call('auth/status')).body.loginTheme,'ocean');
 await call('admin/theme/login',{token:admin,method:'PUT',body:{theme:'invalid'},expect:400});
