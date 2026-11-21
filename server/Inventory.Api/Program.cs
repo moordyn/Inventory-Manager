@@ -158,6 +158,44 @@ app.MapPut("/api/admin/stores/{id}/name",async (HttpContext ctx,string id,StoreN
     cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("name",name);
     return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{updated=true}):Results.NotFound();
 });
+app.MapPut("/api/admin/stores/{id}",async (HttpContext ctx,string id,StoreRequest req)=>{
+    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    var newId=req.Id?.Trim();var name=req.Name?.Trim();
+    if(newId is null||!Regex.IsMatch(newId,@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(name)||name.Length>100)
+        return Results.BadRequest("Store ID must be 2–24 letters, numbers, hyphens or underscores; name must be 1–100 characters.");
+    if(id=="DEFAULT" && newId!="DEFAULT")return Results.BadRequest("The original DEFAULT store ID cannot be changed. Its name can be edited.");
+    await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
+    await using(var exists=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM stores WHERE id=@id)",c,tx)){
+        exists.Parameters.AddWithValue("id",id);
+        if(!(bool)(await exists.ExecuteScalarAsync()??false))return Results.NotFound();
+    }
+    if(id==newId){
+        await using var update=new NpgsqlCommand("UPDATE stores SET name=@name WHERE id=@id",c,tx);
+        update.Parameters.AddWithValue("name",name);update.Parameters.AddWithValue("id",id);
+        await update.ExecuteNonQueryAsync();
+    }else{
+        await using(var check=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM stores WHERE id=@id)",c,tx)){
+            check.Parameters.AddWithValue("id",newId);
+            if((bool)(await check.ExecuteScalarAsync()??false))return Results.Conflict("That Store ID is already in use.");
+        }
+        await using(var create=new NpgsqlCommand("INSERT INTO stores(id,name,active) SELECT @newId,@name,active FROM stores WHERE id=@oldId",c,tx)){
+            create.Parameters.AddWithValue("newId",newId);create.Parameters.AddWithValue("name",name);create.Parameters.AddWithValue("oldId",id);
+            await create.ExecuteNonQueryAsync();
+        }
+        foreach(var table in new[]{"items","movements","employees","employee_store_access","sessions"}){
+            await using var move=new NpgsqlCommand($"UPDATE {table} SET store_id=@newId WHERE store_id=@oldId",c,tx);
+            move.Parameters.AddWithValue("newId",newId);move.Parameters.AddWithValue("oldId",id);
+            await move.ExecuteNonQueryAsync();
+        }
+        await using(var primary=new NpgsqlCommand("UPDATE employees SET primary_store_id=@newId WHERE primary_store_id=@oldId",c,tx)){
+            primary.Parameters.AddWithValue("newId",newId);primary.Parameters.AddWithValue("oldId",id);await primary.ExecuteNonQueryAsync();
+        }
+        await using(var remove=new NpgsqlCommand("DELETE FROM stores WHERE id=@oldId",c,tx)){
+            remove.Parameters.AddWithValue("oldId",id);await remove.ExecuteNonQueryAsync();
+        }
+    }
+    await tx.CommitAsync();return Results.Ok(new{id=newId,name});
+});
 app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
     await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT primary_store_id,id,name,active FROM employees ORDER BY primary_store_id,id",c);
