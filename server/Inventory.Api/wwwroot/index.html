@@ -94,7 +94,7 @@ input,select,textarea{transition:border-color .15s,box-shadow .15s}input[type=ch
     <p id="googleConnectionStatus" class="muted">Checking connection…</p>
   </div>
   <div class="admin-tools">
-    <button class="btn primary" id="connectGoogleBtn" type="button">Connect Google Account</button>
+    <button class="btn primary" id="connectGoogleBtn" type="button">Get email alerts with Google</button>
     <button class="btn" id="disconnectGoogleBtn" type="button" style="display:none">Disconnect</button>
   </div>
  </div>
@@ -318,7 +318,7 @@ async function loadAlertSettings(){
   $('alertsEnabled').checked=settings.enabled;
   $('alertRecipients').value=settings.recipients||'';
   $('googleConnectionStatus').textContent=settings.googleEmail?'Connected as '+settings.googleEmail:'No Google account connected for this store.';
-  $('connectGoogleBtn').textContent=settings.googleEmail?'Change Google Account':'Connect Google Account';
+  $('connectGoogleBtn').textContent=settings.googleEmail?'Change Google Account':'Get email alerts with Google';
   $('connectGoogleBtn').disabled=!settings.googleConfigured;
   $('disconnectGoogleBtn').style.display=settings.googleEmail?'':'none';
   $('smtpStatus').textContent=settings.googleEmail?(settings.googleConfigured?'Emails will be sent using this store’s connected Google account.':'Google sign-in is not fully configured on the server.'):settings.googleConfigured?'Connect a Google account to send alerts from this store.':settings.senderConfigured?'Using server Gmail SMTP. Google sign-in requires OAuth server configuration.':'Google sign-in needs server configuration. Ask the server owner to configure its OAuth credentials.';
