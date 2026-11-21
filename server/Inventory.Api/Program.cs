@@ -408,7 +408,8 @@ async Task<bool> CanManageStore(HttpContext ctx,string store){
     return (bool)(await cmd.ExecuteScalarAsync()??false);
 }
 
-const string GoogleRedirect="https://inv.mrmschf.xyz/api/google/callback";
+const string PublicOrigin="https://zagginventorymanager.com";
+const string GoogleRedirect=PublicOrigin+"/api/google/callback";
 const string GmailScope="https://www.googleapis.com/auth/gmail.send";
 var googleCredentials=new GoogleOAuthCredentials(Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")??"",Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET")??"");
 var keyText=Environment.GetEnvironmentVariable("GOOGLE_TOKEN_KEY")??"";
@@ -499,10 +500,10 @@ app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthI
             return Results.BadRequest("The Google JSON contains invalid OAuth client credentials.");
         if(!web.TryGetProperty("redirect_uris",out var redirects)||redirects.ValueKind!=JsonValueKind.Array
           ||!redirects.EnumerateArray().Any(x=>x.ValueKind==JsonValueKind.String&&x.GetString()==GoogleRedirect))
-            return Results.BadRequest("Add https://inv.mrmschf.xyz/api/google/callback to the Google OAuth client's redirect URIs.");
+            return Results.BadRequest("Add "+GoogleRedirect+" to the Google OAuth client's redirect URIs.");
         if(!web.TryGetProperty("javascript_origins",out var origins)||origins.ValueKind!=JsonValueKind.Array
-          ||!origins.EnumerateArray().Any(x=>x.ValueKind==JsonValueKind.String&&x.GetString()=="https://inv.mrmschf.xyz"))
-            return Results.BadRequest("Add https://inv.mrmschf.xyz to the Google OAuth client's authorized JavaScript origins.");
+          ||!origins.EnumerateArray().Any(x=>x.ValueKind==JsonValueKind.String&&x.GetString()==PublicOrigin))
+            return Results.BadRequest("Add "+PublicOrigin+" to the Google OAuth client's authorized JavaScript origins.");
     }catch(JsonException){return Results.BadRequest("The selected file does not contain valid JSON.");}
 
     // A different OAuth client cannot refresh tokens connected using the previous client.
