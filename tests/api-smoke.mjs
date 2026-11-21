@@ -270,6 +270,104 @@ await call('auth/employee-login',{method:'POST',body:{employeeId:'RENAMEDUSER',p
 employeeToken=(await call('auth/employee-login',{method:'POST',body:{employeeId:'RENAMEDUSER',password:resetPassword},expect:200})).body.token;
 assert.ok(employeeToken,'New password should permit login');
 
+// Repair queue integration: per-store FIFO, immutable check-in attribution,
+// exactly-once multiple part deductions, payment balance and part reversal.
+await call('repairs',{expect:401});
+await call('repairs',{token:admin,expect:200});
+const createKey=randomUUID();
+const repairBody={
+ device:'iPhone 14 Pro',repairType:'Soft OLED replacement',quotedTotal:120,paidUpfront:30,
+ customerName:'Example Customer',customerContact:'555-0100',serialNumber:'TEST-SERIAL-1',
+ notes:'Replace display and test touch',assignedTo:'RENAMEDUSER',idempotencyKey:createKey
+};
+await call('repairs',{token:admin,method:'POST',body:{...repairBody,paidUpfront:150,idempotencyKey:randomUUID()},expect:400});
+const createdRepair=(await call('repairs',{token:admin,method:'POST',body:repairBody,expect:201})).body.id;
+const retryRepair=(await call('repairs',{token:admin,method:'POST',body:repairBody,expect:200})).body;
+assert.equal(retryRepair.id,createdRepair);
+assert.equal(retryRepair.duplicate,true,'Network retry must not create another ticket');
+await call('repairs',{token:admin,method:'POST',body:{...repairBody,device:'Other device'},expect:409});
+const laterRepair=(await call('repairs',{token:admin,method:'POST',body:{
+ device:'iPad Pro',repairType:'Charging port',quotedTotal:80,paidUpfront:0,idempotencyKey:randomUUID()
+},expect:201})).body.id;
+let repairQueue=(await call('repairs',{token:admin})).body;
+assert.deepEqual(repairQueue.map(r=>r.id),[createdRepair,laterRepair],'Active repairs are oldest first');
+assert.equal(repairQueue[0].createdBy,'OWNER');
+assert.equal(repairQueue[0].paidUpfront,30);
+assert.equal(repairQueue[0].balanceDue,90);
+assert.ok((await call('repairs/technicians',{token:admin})).body.some(x=>x.id==='RENAMEDUSER'));
+let detail=(await call('repairs/'+createdRepair,{token:admin})).body;
+assert.equal(detail.ticket.serialNumber,'TEST-SERIAL-1');
+assert.equal(detail.ticket.createdBy,'OWNER');
+assert.equal(detail.ticket.assignedTo,'RENAMEDUSER');
+await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'invalid'},expect:400});
+await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'in_progress'},expect:200});
+await call('repairs/'+createdRepair+'/assign',{token:admin,method:'PUT',body:{employeeId:'NOT_EMPLOYEE'},expect:400});
+await call('repairs/'+createdRepair+'/assign',{token:admin,method:'PUT',body:{employeeId:null},expect:200});
+await call('repairs/'+createdRepair+'/assign',{token:admin,method:'PUT',body:{employeeId:'RENAMEDUSER'},expect:200});
+const partKey1=randomUUID(),partKey2=randomUUID();
+const consumed1=(await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
+ itemId:id,quantity:1,idempotencyKey:partKey1
+},expect:200})).body;
+assert.equal(consumed1.after,6);
+const consumed2=(await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
+ code:'701233100200',quantity:2,idempotencyKey:partKey2
+},expect:200})).body;
+assert.equal(consumed2.after,4);
+assert.equal((await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
+ code:'701233100200',quantity:2,idempotencyKey:partKey2
+},expect:200})).body.duplicate,true);
+await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
+ code:'BAD-SKU',quantity:2,idempotencyKey:partKey2
+},expect:409});
+await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
+ itemId:id,quantity:50,idempotencyKey:randomUUID()
+},expect:400});
+detail=(await call('repairs/'+createdRepair,{token:admin})).body;
+assert.equal(detail.parts.length,2);
+assert.equal(detail.parts.reduce((sum,p)=>sum+p.quantity,0),3);
+assert.ok(detail.parts.every(p=>p.movementId>0));
+assert.ok(detail.events.some(e=>e.kind==='part_used'));
+const itemAfterParts=(await call('items',{token:admin})).body.find(x=>x.id===id);
+assert.equal(itemAfterParts.quantity,4,'Two separately scanned parts must deduct exactly 3 units total');
+assert.equal((await call('items/'+id+'/history',{token:admin})).body.filter(m=>
+ String(m.note||'').includes('Repair #'+createdRepair)).length,2);
+const returnKey=randomUUID();
+assert.equal((await call('repairs/'+createdRepair+'/parts/'+consumed1.partId+'/return',{
+ token:admin,method:'POST',body:{idempotencyKey:returnKey},expect:200
+})).body.returned,true);
+assert.equal((await call('repairs/'+createdRepair+'/parts/'+consumed1.partId+'/return',{
+ token:admin,method:'POST',body:{idempotencyKey:returnKey},expect:200
+})).body.duplicate,true);
+await call('repairs/'+createdRepair+'/parts/'+consumed1.partId+'/return',{
+ token:admin,method:'POST',body:{idempotencyKey:randomUUID()},expect:409
+});
+assert.equal((await call('items',{token:admin})).body.find(x=>x.id===id).quantity,5);
+assert.equal((await call('repairs/'+createdRepair,{token:admin})).body.parts.filter(p=>!p.returnedAt).length,1);
+const paymentKey=randomUUID();
+assert.equal((await call('repairs/'+createdRepair+'/payments',{token:admin,method:'POST',body:{
+ amount:40,idempotencyKey:paymentKey
+},expect:200})).body.balanceDue,50);
+assert.equal((await call('repairs/'+createdRepair+'/payments',{token:admin,method:'POST',body:{
+ amount:40,idempotencyKey:paymentKey
+},expect:200})).body.duplicate,true);
+await call('repairs/'+createdRepair+'/payments',{token:admin,method:'POST',body:{
+ amount:51,idempotencyKey:randomUUID()
+},expect:400});
+assert.equal((await call('repairs/'+createdRepair,{token:admin})).body.ticket.balanceDue,50);
+await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'completed'},expect:200});
+await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
+ itemId:id,quantity:1,idempotencyKey:randomUUID()
+},expect:409});
+await call('repairs/'+laterRepair+'/status',{token:admin,method:'PUT',body:{status:'cancelled'},expect:200});
+repairQueue=(await call('repairs',{token:admin})).body;
+assert.equal(repairQueue.length,0);
+assert.equal((await call('repairs?history=true',{token:admin})).body.length,2);
+await call('auth/select-store',{token:admin,method:'POST',body:{storeId:'BRANCH2'},expect:200});
+assert.equal((await call('repairs',{token:admin})).body.length,0);
+await call('repairs/'+createdRepair,{token:admin,expect:404});
+await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'checked_in'},expect:404});
+await call('auth/select-store',{token:admin,method:'POST',body:{storeId:'DEFAULT'},expect:200});
+
 await call('items/'+id+'/delete',{token:admin,method:'POST',body:{confirmation:'TEST CHARGING KIT'},expect:200});
 audit=(await call('admin/audit',{token:admin})).body;
 assert.ok(audit.some(x=>x.action==='product.deleted'&&x.target===id));
