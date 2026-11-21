@@ -14,12 +14,25 @@ with client_file.open(encoding="utf-8") as f:
 client_id = web.get("client_id", "")
 client_secret = web.get("client_secret", "")
 redirects = web.get("redirect_uris", [])
+origins = web.get("javascript_origins", [])
+# Get the domain from the installed host, not an unrelated developer's OAuth configuration.
+values_from_env = {}
+for line in env_file.read_text(encoding="utf-8").splitlines():
+    if "=" in line and not line.lstrip().startswith("#"):
+        key, value = line.split("=", 1)
+        values_from_env[key] = value
+public_origin = values_from_env.get("PUBLIC_ORIGIN", "https://zagginventorymanager.com")
+if not re.fullmatch(r"https://[a-z0-9-]+(?:\.[a-z0-9-]+)+", public_origin):
+    raise SystemExit("PUBLIC_ORIGIN in .env must be https://your-domain.example without a trailing slash.")
+expected_callback = public_origin + "/api/google/callback"
 if not isinstance(client_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]+\.apps\.googleusercontent\.com", client_id):
     raise SystemExit("Invalid Google OAuth Client ID in JSON file")
 if not isinstance(client_secret, str) or not re.fullmatch(r"[A-Za-z0-9._~-]{10,256}", client_secret):
     raise SystemExit("Invalid Google OAuth Client Secret in JSON file")
-if "https://zagginventorymanager.com/api/google/callback" not in redirects:
-    raise SystemExit("The Google OAuth redirect URI does not match this installation")
+if not isinstance(redirects, list) or expected_callback not in redirects:
+    raise SystemExit("Google OAuth JSON must list redirect URI " + expected_callback + "; re-download the JSON after updating Google Cloud.")
+if not isinstance(origins, list) or public_origin not in origins:
+    raise SystemExit("Google OAuth JSON must list JavaScript origin " + public_origin + "; re-download the JSON after updating Google Cloud.")
 lines = env_file.read_text(encoding="utf-8").splitlines()
 values = {"GOOGLE_CLIENT_ID": client_id, "GOOGLE_CLIENT_SECRET": client_secret}
 present = {}
