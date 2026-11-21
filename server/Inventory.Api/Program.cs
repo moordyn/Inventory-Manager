@@ -853,9 +853,9 @@ app.MapPut("/api/movements/{id:long}/note",async (HttpContext ctx,long id,Checko
     if(req.ExpectedRevision<0)return Results.BadRequest("Invalid note revision.");
     await using var c=await Connect();
     await using var tx=await c.BeginTransactionAsync();
-    string? original;string employee;int revision;
+    string? original;int revision;
     await using(var select=new NpgsqlCommand("""
-        SELECT m.note,m.employee_id,m.note_revision
+        SELECT m.note,m.note_revision
         FROM movements m WHERE m.id=@id AND m.store_id=@store AND m.delta<0
         FOR UPDATE
         """,c,tx)){
@@ -864,10 +864,10 @@ app.MapPut("/api/movements/{id:long}/note",async (HttpContext ctx,long id,Checko
         await using var reader=await select.ExecuteReaderAsync();
         if(!await reader.ReadAsync())return Results.NotFound();
         original=reader.IsDBNull(0)?null:reader.GetString(0);
-        employee=reader.GetString(1);
-        revision=reader.GetInt32(2);
+        revision=reader.GetInt32(1);
     }
-    if(employee!=who.Value.employee&&!who.Value.admin)return Results.Forbid();
+    // Any active employee who can access this store may annotate its checkout history.
+    // The revision log records every edit and prevents changes to the stock movement itself.
     if(req.ExpectedRevision!=revision)return Results.Conflict("This note was changed by someone else. Refresh the transaction before editing.");
     if(string.Equals(original?.Trim(),note,StringComparison.Ordinal))
         return Results.Ok(new{updated=false,note,noteRevision=revision});
