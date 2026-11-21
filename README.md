@@ -36,39 +36,26 @@ Backups are saved to `/var/backups/inventory-manager` daily at 03:15 local time 
 
 No employee accounts, invoicing, accounting or offline edits in v1.
 
-## Gmail and Google Sign-In for low-stock email alerts
+## Low-stock email alerts: one global sender, separate store recipients
 
-Store administrators can configure email alerts for **their own store** in **Administration → Low-stock email alerts**. Each store has its own connected Google sending account and up to 10 recipient addresses. Global admins can switch to another store and manage its alerts. Notifications are generated on stock changes at or below the product's minimum and sent once per low-stock cycle; a restock above the minimum rearms the next alert.
+**A single company-wide email account sends notifications for all stores.** Only global administrators can connect, change, or disconnect this account. Store administrators can enable or disable alerts and set up to 10 recipient addresses for their own location in **Administration → Low-stock email alerts**. Test emails use the same global sender.
 
-### Dashboard JSON import (recommended for global administrators)
+Alerts are queued when a product is at or below its minimum stock threshold and sent once per low-stock cycle. Restocking above the minimum rearms the next alert. The background worker retries failed deliveries.
 
-After deploying the latest version using `cd /opt/inventory-manager && bash deploy/install.sh`, sign in with the global administrator PIN and open **Administration → Google OAuth configuration**. Upload the **Web application OAuth Client JSON** downloaded from Google Cloud, enter the global administrator PIN again, and click **Import Google configuration**.
+### Set up the global Gmail sender from the dashboard
 
-The API checks the client type, Client ID, Client Secret, authorized origin (`https://inv.mrmschf.xyz`) and callback URL (`https://inv.mrmschf.xyz/api/google/callback`). The secret is encrypted using the persistent `GOOGLE_TOKEN_KEY` on the Ubuntu server, stored in PostgreSQL, and activated immediately **without a restart**. The interface shows the Client ID and configuration status, never the Client Secret. Only PIN-authenticated global administrators can import or replace this application-wide configuration. Store administrators retain their own per-store Gmail connections and recipient settings.
+1. Update the Ubuntu installation: `cd /opt/inventory-manager && bash deploy/install.sh`.
+2. Log in as a PIN-authenticated global administrator. Open **Administration → Global email sender**.
+3. If the Google OAuth application is not yet configured, import the Google Cloud **Web application OAuth Client JSON** and confirm your global administrator PIN. The JSON is read by the browser and sent only to the authorized API; the Client Secret is encrypted in PostgreSQL with the host's persistent `GOOGLE_TOKEN_KEY` and never stored in GitHub.
+4. In that same global section, click **Connect global Gmail** and authorize the one Gmail account to send notifications for all stores.
+5. Store administrators can now open **Administration → Low-stock email alerts**, type their own recipient addresses, enable alerts, save, and click **Send test email**. They have no access to the sending Gmail connection.
 
-**No manual copying of JSON or OAuth credentials to the server is needed for this method.** The installer must be run at least once to create and preserve the server encryption key. Back up both the database and the private `.env` encryption key so restored Gmail connections remain usable. If changing to a different OAuth Client ID, existing per-store Google senders must be disconnected first.
+The Gmail authorization uses `https://www.googleapis.com/auth/gmail.send` and the OAuth Web application's redirect `https://inv.mrmschf.xyz/api/google/callback`. In Google Cloud, enable Gmail API, use an **External** audience if connecting ordinary Gmail accounts, and include any required test users. Google's **Testing** publishing status can result in refresh tokens expiring after seven days; production use may require verification.
 
-### Google OAuth setup (recommended)
+**Upgrade note:** Prior per-store Google sender authorizations are retained as legacy data but are **no longer used** for outgoing mail. A global administrator must connect the global sender once after upgrading. Existing per-store recipient addresses and alert settings are preserved.
 
-1. In Google Cloud, enable **Gmail API** and set up an OAuth **Web application** with the **Gmail Send** scope (`https://www.googleapis.com/auth/gmail.send`). Use the authorized origin `https://inv.mrmschf.xyz` and redirect URI `https://inv.mrmschf.xyz/api/google/callback`.
-2. **Alternative manual setup only:** Keep the downloaded Google OAuth client JSON **private**. Transfer it securely to your Ubuntu server (e.g. root's home directory); **never put it in GitHub, upload it to the publicly served app, or copy it to the Docker image**.
-3. On the Ubuntu server, run the installer/update first and then import that JSON:
+**Optional manual/server setup:** For global OAuth Client ID/Secret settings, the private `deploy/configure-google.sh` helper can import a Web application JSON file into the server's gitignored `.env`; the global administrator still must authorize a sending Gmail account once. A centrally configured `SMTP_USER` and `SMTP_APP_PASSWORD` may be used as a fallback sender if Gmail API is not connected. Never commit Google client secrets, SMTP passwords, OAuth refresh tokens, or the token encryption key to GitHub.
 
-   ```bash
-   cd /opt/inventory-manager
-   bash deploy/install.sh
-   sudo bash deploy/configure-google.sh /root/google-oauth-client.json
-   ```
+**Backup:** Keep a protected backup of both PostgreSQL and the private host `.env` encryption key; losing the latter prevents decrypting connected Gmail tokens.
 
-   Replace the JSON filename with the actual private file path. The import script restarts the API, validates the redirect URL, and securely adds `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and a persistent `GOOGLE_TOKEN_KEY` to the **gitignored** `.env` with file mode 600. The installer can generate a key as well; never overwrite the existing encryption key or connected accounts' refresh tokens will become unusable. Remove the imported source JSON from the server when no longer needed.
-4. Visit the website, log in as an authorized store administrator, open **Administration → Low-stock email alerts**, and click **Connect Google Account**. Grant access to **send emails**; Google returns to the app. Fill in recipients, enable alerts, **Save email settings**, and **Send test email**.
-
-Google access tokens are refreshed using an encrypted, per-store refresh token in PostgreSQL; the encrypted value can only be decrypted using the persistent server key. The server does not need each store's Gmail password. Store admins can change or disconnect their own Google sender.
-
-**Important:** If the OAuth app's publishing status is **Testing** with External audience, refresh tokens can expire after 7 days. Google might require app verification for wider production use of the sensitive `gmail.send` scope. Google accounts not listed as test users might be blocked. Back up both the database and the private server `.env` (with tightly controlled access) to preserve connections.
-
-### Optional SMTP fallback
-
-A server operator may configure `SMTP_USER` and `SMTP_APP_PASSWORD` in the host `.env`. When a store has connected a Google account, Gmail API is preferred for that store. Otherwise SMTP is used if configured. SMTP passwords and OAuth client secrets must never be stored in the repository.
-
-**Security:** Existing Employee ID-only store-admin login is a weak authentication boundary. Stronger admin authentication should be added before treating this as production-grade access control.
+**Security:** Employee ID-only sign-in for store administrators is not strong authentication. Use stronger sign-in before treating the role boundary as production-grade protection.
