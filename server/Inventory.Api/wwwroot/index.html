@@ -414,7 +414,7 @@ function modal(title,body,footer=''){
  $('modalRoot').innerHTML='<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-head"><h2 id="modalTitle">'+esc(title)+'</h2><button class="btn ghost" id="modalClose" aria-label="Close dialog">×</button></div>'+body+footer+'</section></div>';
  $('modalClose').onclick=closeModal;
  document.querySelector('.modal-backdrop').onclick=e=>{if(e.target.classList.contains('modal-backdrop'))closeModal()};
- const first=$('modalRoot').querySelector('input:not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled])');
+ const first=$('modalRoot').querySelector('input:not([disabled]),select:not([disabled]),textarea:not([disabled])')||$('modalClose');
  if(first)requestAnimationFrame(()=>{if(first.isConnected)first.focus({preventScroll:true})});
 }
 document.addEventListener('keydown',e=>{
