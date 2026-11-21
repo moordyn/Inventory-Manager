@@ -110,6 +110,19 @@ jobs:
           if (!backend.includes('CREATE TABLE IF NOT EXISTS admin_audit') || !backend.includes('WriteAdminAudit(')) {
             throw new Error('Administrative activity persistence is missing');
           }
+          const origin = 'https://zagginventorymanager.com';
+          if (!backend.includes('const string PublicOrigin="'+origin+'";') ||
+              !backend.includes('const string GoogleRedirect=PublicOrigin+"/api/google/callback";') ||
+              !backend.includes('x.GetString()==PublicOrigin')) {
+            throw new Error('Google OAuth public domain, callback, or validation is incorrect');
+          }
+          if (backend.includes('inv.mrmschf.xyz')) {
+            throw new Error('Retired OAuth hostname still referenced in application code');
+          }
+          const importer = fs.readFileSync('deploy/configure-google.sh','utf8');
+          if (!importer.includes(origin+'/api/google/callback') || importer.includes('inv.mrmschf.xyz')) {
+            throw new Error('Google configuration importer is not using the new domain');
+          }
           console.log('Frontend, branding, scanner, access, reporting and administrative activity checks passed');
           NODE
 
