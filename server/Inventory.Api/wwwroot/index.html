@@ -465,8 +465,17 @@ body[data-theme="glacier"] tbody tr:hover,
 }
 
 
+
+/* Ambient login aurora. The canvas is visual-only; form controls retain all pointer access. */
+.login-screen{position:relative;isolation:isolate;overflow:hidden;background:var(--bg)}
+.login-aurora{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:.95}
+.login-screen::before{content:"";position:absolute;inset:-20%;z-index:0;pointer-events:none;background:radial-gradient(ellipse 46% 36% at 54% 44%,color-mix(in srgb,var(--accent) 9%,transparent),transparent 75%);filter:blur(60px)}
+.login-screen>.login-card{position:relative;z-index:1;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 24px 90px #0003}
+body[data-theme="glacier"] .login-screen>.login-card{background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 24px 80px #274c6b24}
+@media(prefers-reduced-motion:reduce){.login-aurora{display:none}.login-screen::before{filter:none}}
+
 </style></head><body data-theme="mint">
-<div id="auth" class="login-screen"><div class="card login-card"><div class="brand brand-login"><img class="brand-wordmark brand-wordmark-login" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async" fetchpriority="high"></div><div id="setup" class="hidden">
+<div id="auth" class="login-screen"><canvas id="loginAurora" class="login-aurora" aria-hidden="true"></canvas><div class="card login-card"><div class="brand brand-login"><img class="brand-wordmark brand-wordmark-login" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async" fetchpriority="high"></div><div id="setup" class="hidden">
  <h1>Set up your administrator account</h1>
  <p>Enter the one-time installation token from the server. Create an email and password for the OWNER account. After connecting Gmail, verify the administrator email in Settings.</p>
  <form id="setupForm">
@@ -681,14 +690,122 @@ function renderThemeSelectors(){
  }
 }
 
+
+/* Theme-driven nebula: ambient drift plus mouse/touch-controlled luminous swishes.
+   Uses one capped-DPR canvas, pauses while signed in/hidden, and respects reduced motion. */
+const loginAurora=(()=>{
+ const canvas=$('loginAurora'),context=canvas.getContext('2d',{alpha:true});
+ if(!context)return{start(){},stop(){},palette(){}};
+ const media=window.matchMedia('(prefers-reduced-motion: reduce)');
+ let width=0,height=0,palette=null,frame=0,lastFrame=0,active=false,pointer=null,lastPointer=null,clouds=[],trails=[],tick=0;
+ const parseHex=v=>{
+  let color=String(v||'').trim();
+  if(/^#[0-9a-f]{3}$/i.test(color))color='#'+[...color.slice(1)].map(x=>x+x).join('');
+  if(!/^#[0-9a-f]{6}$/i.test(color))return[145,221,186];
+  return[1,3,5].map(i=>parseInt(color.slice(i,i+2),16));
+ };
+ const rgba=(rgb,alpha)=>'rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+','+alpha+')';
+ function updatePalette(){
+  const styles=getComputedStyle(document.body);
+  const accent=parseHex(styles.getPropertyValue('--accent'));
+  const border=parseHex(styles.getPropertyValue('--active-border'));
+  const text=parseHex(styles.getPropertyValue('--muted'));
+  palette=[accent,border,text];
+ }
+ function resize(){
+  const rect=canvas.getBoundingClientRect();
+  width=rect.width;height=rect.height;
+  if(!width||!height)return;
+  const dpr=Math.min(window.devicePixelRatio||1,1.5);
+  canvas.width=Math.max(1,Math.round(width*dpr));canvas.height=Math.max(1,Math.round(height*dpr));
+  context.setTransform(dpr,0,0,dpr,0,0);
+  clouds=Array.from({length:5},(_,i)=>({
+   x:width*(.14+i*.18),y:height*(.2+(i%3)*.27),
+   radius:Math.max(width,height)*(.24+(i%2)*.09),phase:i*1.7,tint:i%3
+  }));
+ }
+ function bloom(x,y,r,color,alpha){
+  if(r<=0||alpha<=0)return;
+  const gradient=context.createRadialGradient(x,y,0,x,y,r);
+  gradient.addColorStop(0,rgba(color,alpha));
+  gradient.addColorStop(.26,rgba(color,alpha*.58));
+  gradient.addColorStop(.65,rgba(color,alpha*.13));
+  gradient.addColorStop(1,rgba(color,0));
+  context.fillStyle=gradient;context.beginPath();context.arc(x,y,r,0,Math.PI*2);context.fill();
+ }
+ function render(now){
+  if(!active)return;
+  frame=requestAnimationFrame(render);
+  if(now-lastFrame<33)return; // ~30fps max while the sign-in view is visible
+  const dt=Math.min((now-lastFrame)||33,70);
+  lastFrame=now;tick+=dt*.00035;
+  context.clearRect(0,0,width,height);
+  if(!width||!height||!palette)return;
+  const light=document.body.dataset.theme==='glacier';
+  for(const c of clouds){
+   const x=c.x+Math.sin(tick*.85+c.phase)*width*.10;
+   const y=c.y+Math.cos(tick*.62+c.phase)*height*.10;
+   bloom(x,y,c.radius,palette[c.tint],light?.105:.14);
+  }
+  if(pointer){
+   bloom(pointer.x,pointer.y,Math.max(135,Math.min(width,height)*.29),palette[0],light?.13:.20);
+   bloom(pointer.x+35,pointer.y-28,Math.max(90,Math.min(width,height)*.19),palette[1],light?.08:.11);
+  }
+  trails=trails.filter(t=>now-t.born<1600);
+  for(const t of trails){
+   const progress=(now-t.born)/1600;
+   const spread=26+progress*125+t.power*22;
+   bloom(t.x+t.vx*progress*35,t.y+t.vy*progress*35,spread,palette[t.tint],(light?.22:.27)*Math.pow(1-progress,1.45));
+  }
+ }
+ function move(e){
+  if(!active||media.matches)return;
+  const rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;
+  const x=e.clientX-rect.left,y=e.clientY-rect.top;
+  const current={x,y};
+  if(lastPointer){
+   const dx=x-lastPointer.x,dy=y-lastPointer.y;
+   const dist=Math.hypot(dx,dy);
+   if(dist>4){
+    const steps=Math.min(5,Math.ceil(dist/25)),now=performance.now();
+    for(let i=1;i<=steps;i++)trails.push({
+      x:lastPointer.x+dx*i/steps,y:lastPointer.y+dy*i/steps,
+      vx:dx/(dist||1),vy:dy/(dist||1),power:Math.min(dist/70,2.5),
+      tint:(trails.length+i)%3,born:now
+    });
+    if(trails.length>75)trails.splice(0,trails.length-75);
+   }
+  }
+  pointer=current;lastPointer=current;
+ }
+ function leave(){lastPointer=null;pointer=null}
+ function stop(){
+  active=false;cancelAnimationFrame(frame);lastFrame=0;pointer=null;lastPointer=null;trails=[];
+  context.clearRect(0,0,width,height);
+ }
+ function start(){
+  stop();updatePalette();
+  if(media.matches||document.hidden)return;
+  resize();if(!width||!height)return;
+  active=true;frame=requestAnimationFrame(render);
+ }
+ canvas.parentElement.addEventListener('pointermove',move,{passive:true});
+ canvas.parentElement.addEventListener('pointerleave',leave,{passive:true});
+ canvas.parentElement.addEventListener('pointerdown',move,{passive:true});
+ window.addEventListener('resize',()=>{if(active)resize()},{passive:true});
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();else if(!$('auth').classList.contains('hidden'))start()});
+ media.addEventListener('change',()=>{if(media.matches)stop();else if(!$('auth').classList.contains('hidden'))start()});
+ return {start,stop,palette:updatePalette};
+})();
+
 let token=sessionStorage.getItem('inventory-token')||'',items=[],history=[],productHistoryRows=[],activeProductHistoryItemId=null,reorderRows=[],page='overview',busy=false,stream=null,identity=null,allowedStores=[];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=x=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(Number(x||0));
 const time=x=>new Date(x).toLocaleString();
 const toast=(message,error=false)=>{const el=$('toast');el.textContent=message;el.className='toast'+(error?' error':'');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.add('hidden'),4500)};
 async function api(path,method='GET',data){const response=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(data!==undefined?{body:JSON.stringify(data)}:{})});if(!response.ok){let text=await response.text();if(response.status===401&&token){logout(false)}if(response.status===429){let seconds=Number(response.headers.get('Retry-After'));try{const data=JSON.parse(text);if(Number.isFinite(Number(data.retryAfterSeconds)))seconds=Number(data.retryAfterSeconds)}catch{}throw Error(seconds>0?'Too many failed sign-ins. Try again in '+Math.floor(Math.ceil(seconds)/60)+' min '+(Math.ceil(seconds)%60)+' sec.':'Too many failed attempts. Try again shortly.')}throw Error(text.slice(0,220)||('HTTP '+response.status+' — check API logs'))}return response.status===204?null:response.json()}
-function authScreen(which){setTheme(loginTheme);$('auth').classList.remove('hidden');$('app').classList.add('hidden');$('authLoading').classList.add('hidden');$('authMsg').textContent='';for(const name of ['setup','employeeLogin','register','forgot','authTokenView'])$(name).classList.toggle('hidden',name!==which)}
-async function enter(){try{identity=await api('auth/me');setTheme(identity.theme);renderThemeSelectors();$('signedInEmployee').textContent=identity.employeeName||identity.employeeId;$('signedInEmployeeId').textContent='Employee ID: '+identity.employeeId;$('accountEmailStatus').textContent=identity.emailVerified?'Verified email: '+(identity.email||'—'):'Email not verified: '+(identity.email||'—')+'. Connect the global mail sender and request verification below.';$('sendMyVerificationBtn').classList.toggle('hidden',!!identity.emailVerified);$('mobileEmployeeName').textContent=identity.employeeName||identity.employeeId;allowedStores=identity.isGlobalAdmin?await api('admin/stores'):await api('auth/stores');$('adminNav').classList.toggle('hidden',!identity.isAdmin);$('mobileAdminNav').classList.toggle('hidden',!identity.isAdmin);$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;renderStorePicker();updateLocationBrand();navigate('overview');startIdleTimer();await load();
+function authScreen(which){setTheme(loginTheme);$('auth').classList.remove('hidden');$('app').classList.add('hidden');loginAurora.start();$('authLoading').classList.add('hidden');$('authMsg').textContent='';for(const name of ['setup','employeeLogin','register','forgot','authTokenView'])$(name).classList.toggle('hidden',name!==which)}
+async function enter(){try{identity=await api('auth/me');setTheme(identity.theme);loginAurora.stop();renderThemeSelectors();$('signedInEmployee').textContent=identity.employeeName||identity.employeeId;$('signedInEmployeeId').textContent='Employee ID: '+identity.employeeId;$('accountEmailStatus').textContent=identity.emailVerified?'Verified email: '+(identity.email||'—'):'Email not verified: '+(identity.email||'—')+'. Connect the global mail sender and request verification below.';$('sendMyVerificationBtn').classList.toggle('hidden',!!identity.emailVerified);$('mobileEmployeeName').textContent=identity.employeeName||identity.employeeId;allowedStores=identity.isGlobalAdmin?await api('admin/stores'):await api('auth/stores');$('adminNav').classList.toggle('hidden',!identity.isAdmin);$('mobileAdminNav').classList.toggle('hidden',!identity.isAdmin);$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;renderStorePicker();updateLocationBrand();navigate('overview');startIdleTimer();await load();
  const googleReturn=new URLSearchParams(location.search).get('google');
  if(googleReturn){
    window.history.replaceState(null,'',location.pathname+location.hash);
@@ -776,6 +893,7 @@ async function initialize(){
   }
   const state=await api('auth/status');
   loginTheme=knownTheme(state.loginTheme);if(!token)setTheme(loginTheme);
+  if(!token)loginAurora.start();
   if(!state.initialized)authScreen('setup');
   else if(token)await enter();
   else authScreen('employeeLogin');
