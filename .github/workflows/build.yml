@@ -92,7 +92,25 @@ jobs:
           for (const action of ['function updateAccessActionState()', "removeStoreAccessBtn').onclick", "confirm('Remove '"]) {
             if (!html.includes(action)) throw new Error('Missing employee access workflow: '+action);
           }
-          console.log('Frontend syntax, responsive layout, barcode-scanner, branding, and employee access checks passed');
+          for (const feature of [
+            'id="exportInventoryBtn"', 'id="view-reorder"', 'id="reorderSummary"',
+            'id="exportReorderBtn"', 'id="adminAuditList"',
+            'id="openProductHistoryBtn"', 'data-quick-delta="-5"',
+            "async function loadReorder()", "async function loadAudit()", "function openMovement(item)"
+          ]) {
+            if (!html.includes(feature)) throw new Error('Reporting/stock UI feature missing: ' + feature);
+          }
+          const backend=fs.readFileSync('server/Inventory.Api/Program.cs','utf8');
+          for (const endpoint of [
+            '/api/items/export','/api/items/reorder','/api/items/reorder/export',
+            '/api/items/{id:guid}/history','/api/admin/audit'
+          ]) {
+            if (!backend.includes(endpoint)) throw new Error('Reporting API route missing: '+endpoint);
+          }
+          if (!backend.includes('CREATE TABLE IF NOT EXISTS admin_audit') || !backend.includes('WriteAdminAudit(')) {
+            throw new Error('Administrative activity persistence is missing');
+          }
+          console.log('Frontend, branding, scanner, access, reporting and administrative activity checks passed');
           NODE
 
       - name: Test API reporting, store permissions and administrator audit
