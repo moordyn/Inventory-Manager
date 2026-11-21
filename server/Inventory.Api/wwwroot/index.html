@@ -498,7 +498,9 @@ async function load(){try{const results=await Promise.all([api('items'),api('mov
 function itemRow(x){return '<tr><td data-label="Product"><div class="item-name">'+esc(x.name)+'</div><small>'+esc(x.sku)+'</small></td><td data-label="Category">'+esc(x.category||'—')+'</td><td data-label="Stock"><strong>'+x.quantity+'</strong></td><td data-label="Status"><span class="tag '+(x.quantity<=x.minStock?'low':'ok')+'">'+(x.quantity<=x.minStock?'Low stock':'In stock')+'</span></td><td data-label="Action"><div class="inventory-row-actions"><button type="button" class="btn" data-adjust="'+esc(x.id)+'">Adjust</button><button type="button" class="btn ghost" data-edit="'+esc(x.id)+'">Edit</button></div></td></tr>'}
 function itemTable(list){return list.length?'<table class="inventory-responsive"><thead><tr><th>Product / SKU</th><th>Category</th><th>Stock</th><th>Status</th><th></th></tr></thead><tbody>'+list.map(itemRow).join('')+'</tbody></table>':'<div class="empty">No matching products found</div>'}
 function canEditCheckoutNote(entry){
- return Number(entry.delta)<0&&(identity?.isAdmin||entry.employeeId===identity?.employeeId);
+ // A signed-in employee can document any checkout in their currently authorized store.
+ // The API enforces store isolation and saves the author of every note revision.
+ return !!identity&&Number(entry.delta)<0;
 }
 function noteCellMarkup(entry){
  const id=String(entry.id);
@@ -730,7 +732,7 @@ function openCheckoutNoteEditor(button,entry){
  cell.innerHTML='<div class="checkout-note-editor"><label class="checkout-note-label" for="checkoutNoteEdit'+entry.id+'">Update checkout note</label>'+
   '<textarea id="checkoutNoteEdit'+entry.id+'" maxlength="1000" rows="3" required placeholder="Example: Damaged during repair">'+esc(entry.note||'')+'</textarea>'+
   '<div class="checkout-note-editor-actions"><button type="button" class="btn" data-cancel-checkout-note>Cancel</button><button type="button" class="btn primary" data-save-checkout-note="'+esc(entry.id)+'">Save note</button></div>'+
-  '<p class="field-note">This updates the note only. Stock quantity, checkout time, and employee remain unchanged.</p></div>';
+  '<p class="field-note">Any employee at this store can update checkout notes. Each change records who made it. Stock quantity, checkout time, and original employee remain unchanged.</p></div>';
  cell.querySelector('textarea')?.focus();
 }
 document.addEventListener('click',async e=>{
