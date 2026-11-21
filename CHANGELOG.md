@@ -4,6 +4,14 @@ All notable changes to Inventory Manager are recorded here.
 
 This project uses [Semantic Versioning](https://semver.org/). Repository tags and published GitHub Releases identify immutable source snapshots; deploying a tagged version does **not** automatically update a running server.
 
+## Unreleased — changes on `main` after v1.1.0
+
+- Installer accepts `--domain example.com` / `--domain=https://example.com`; repairs missing or empty `PUBLIC_ORIGIN` while preserving existing secrets.
+- Employees may request a verified change to their own email (current password + matching new address fields + one-use 30-minute link); confirmation revokes sessions.
+- Global administrators may rename employee IDs (including their own original `OWNER` account); related records are migrated atomically and sessions revoked. Owner recovery identity follows its new ID.
+- Documentation reorganized into task-focused deployment, accounts, operations, networking examples and QA references. The old comprehensive-guide path is retained as an index.
+- These items are not automatically part of the published v1.1.0 tag; inspect a newer release/tag or deployed commit before assuming availability.
+
 ## [1.1.0] — Employee email activation and password recovery
 
 ### Added
