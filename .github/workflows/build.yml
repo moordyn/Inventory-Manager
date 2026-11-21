@@ -93,14 +93,19 @@ jobs:
           }
           const fluidSource=fs.readFileSync('server/Inventory.Api/wwwroot/assets/login-fluid.js','utf8');
           for (const marker of ['id="loginAurora"', 'class="login-aurora"',
-              'src="/assets/login-fluid.js?v=2"', 'window.createLoginFluid',
+              'src="/assets/login-fluid.js?v=3"', 'window.createLoginFluid',
               'loginAurora.stop()', 'loginAurora.start()']) {
             if (!html.includes(marker)) throw new Error('Login fluid view/lifecycle missing: '+marker);
           }
           for (const marker of ['webgl2', 'EXT_color_buffer_float', 'advect:', 'vorticity:',
               'divergence:', 'pressure:', 'subtract:', 'display:', 'pointermove',
-              "prefers-reduced-motion: reduce", 'visibilitychange', 'smoothDye(', 'gestureInk', 'pointerdown']) {
+              "prefers-reduced-motion: reduce", 'visibilitychange', 'smoothDye(', 'inkBudget', 'pointerdown']) {
             if (!fluidSource.includes(marker)) throw new Error('Login fluid simulation missing: '+marker);
+          }
+          if (!fluidSource.includes("const dragging=") ||
+              fluidSource.includes("if(!dragging){pointer=null;return;}") ||
+              !fluidSource.includes("inkBudget=Math.min(")) {
+            throw new Error('Mouse movement must inject bounded fluid even without a pressed button');
           }
           if (fluidSource.includes('now-ambient') || fluidSource.includes('function seed()'))
             throw new Error('Background fluid must not inject dye continuously or seed moving clouds');
