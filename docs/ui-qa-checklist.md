@@ -2,6 +2,14 @@
 
 These tests are required before calling a deployment production-ready. Automated CI catches syntax, CSS balance and missing DOM references, but cannot prove camera performance or mobile layout.
 
+## Repair Queue
+- [ ] Repairs tab shows active repairs oldest first on desktop and mobile; completed/cancelled history remains searchable.
+- [ ] Check-in stores device, repair type, total quote, upfront payment, timestamp and employee; invalid deposits are rejected.
+- [ ] Scan multiple parts using camera or select SKU; stock decrements once per usage, low-stock alerts and inventory history update.
+- [ ] Retries with same idempotency key cannot create duplicate tickets, part deductions, payments or stock returns.
+- [ ] Ticket status, assignment, additional payments, return-to-stock and activity history work; a different store cannot view or change the ticket.
+- [ ] On mobile, repair cards and forms stay readable and the bottom navigation permits access to all tabs.
+
 ## Sign-in and navigation
 - [ ] First-time employee entering an unused employee ID is guided to the activation form; matching email and password are required twice.
 - [ ] Password policy enforces 8+ characters with uppercase, lowercase, digit and symbol on client and API.
@@ -12,7 +20,7 @@ These tests are required before calling a deployment production-ready. Automated
 
 - [ ] On iPhone Safari, Android Chrome, and desktop Chrome/Edge, employee ID + individual password sign-in opens Home without flashing back to login.
 - [ ] OWNER initial setup uses the installation token with matching email/password fields, then password sign-in opens Home; the Administration tab appears only for authorized users.
-- [ ] Mobile bottom navigation contains Home, Items, In, Out, History and role-based Admin without clipping at 320, 375, 390 and 430 CSS pixels.
+- [ ] Mobile bottom navigation contains Home, Items, In, Out, Repairs, History and role-based Admin without clipping at 320, 375, 390 and 430 CSS pixels.
 - [ ] The mobile account header has a working Settings and Sign out button.
 - [ ] Silent 15-minute inactivity expiry signs out after genuine inactivity; normal interaction renews the session; background polling does not.
 - [ ] Changing store updates the location heading, products and permissions.
