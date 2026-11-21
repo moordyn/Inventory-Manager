@@ -6,6 +6,20 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: inventory
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: integration-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d inventory"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -80,3 +94,32 @@ jobs:
           }
           console.log('Frontend syntax, responsive layout, barcode-scanner, branding, and employee access checks passed');
           NODE
+
+      - name: Test API reporting, store permissions and administrator audit
+        env:
+          ASPNETCORE_URLS: http://127.0.0.1:18424
+          ConnectionStrings__Inventory: Host=127.0.0.1;Port=5432;Database=inventory;Username=postgres;Password=integration-test-only
+          SETUP_TOKEN: 0123456789abcdef0123456789abcdef01234567
+          GOOGLE_TOKEN_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        run: |
+          node --check tests/api-smoke.mjs
+          dotnet run --project server/Inventory.Api/Inventory.Api.csproj --configuration Release --no-build > /tmp/zagg-api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in $(seq 1 40); do
+            if curl --silent --show-error --fail http://127.0.0.1:18424/health > /dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+              cat /tmp/zagg-api.log
+              exit 1
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != 1 ]]; then
+            cat /tmp/zagg-api.log
+            exit 1
+          fi
+          node tests/api-smoke.mjs || { cat /tmp/zagg-api.log; exit 1; }
