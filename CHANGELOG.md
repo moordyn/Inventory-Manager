@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 ## Unreleased — next feature release
 
+- Repair check-in now automatically assigns the employee checking in the device as its technician. Removed the technician selectors and reassignment API; existing tickets are aligned with their check-in employee on startup.
+
 - Added the Repair Queue module: multi-store FIFO repair tickets, device/repair details, employee and technician tracking, quotes and upfront/additional payment records, status timeline, multi-part barcode usage with atomic inventory checkout and retry protection, stock returns, mobile/desktop views, and integration tests.
 
 - Strengthened the existing theme-matched login and signed-in ambient animation brightness without changing their behavior, and coordinated login secondary buttons plus mobile Settings/Sign Out using theme palette variables.
