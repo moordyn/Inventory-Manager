@@ -2,6 +2,9 @@
 
 Self-hosted barcode inventory application for Windows browsers, mobile browsers, and a planned packaged Windows/iOS client.
 
+> **Complete installation / deployment / recovery:** [ZAGG Inventory Manager end-to-end deployment guide](docs/COMPLETE_DEPLOYMENT_GUIDE.md). This covers a new Ubuntu 24.04/Proxmox installation, Docker Compose/PostgreSQL, Cloudflare DNS, OPNsense DDNS, Nginx Proxy Manager, HTTPS, exact Google OAuth callback and Gmail setup, first-run admin/employee configuration, backups, restore testing, updates and troubleshooting. **Follow this document for new deployments and franchise handover.**
+
+
 ## Current web build
 - Consistent desktop/tablet/mobile design system: sticky sidebar, responsive KPI cards and record tables, compact mobile navigation, accessible dialogs and form labels
 - Fast camera barcode scanning: native BarcodeDetector when supported, prewarmed ZXing fallback on Safari, one camera stream, retail-format hints, flashlight support where available, and clean camera shutdown
@@ -21,7 +24,9 @@ Self-hosted barcode inventory application for Windows browsers, mobile browsers,
 - Online-only PostgreSQL backend; 20-second client refresh
 - Daily compressed PostgreSQL backup script and systemd timer
 
-## Install / update on Ubuntu 24.04 Proxmox LXC
+## Quick install / update on Ubuntu 24.04 Proxmox LXC
+
+**For a fresh install, read [the complete deployment guide](docs/COMPLETE_DEPLOYMENT_GUIDE.md) first.** The installer alone does not configure the domain, firewall, NPM, HTTPS or Google Cloud.
 As root:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/moordyn/Inventory-Manager/main/deploy/install.sh -o /tmp/inventory-install.sh
@@ -42,6 +47,12 @@ In Google Cloud, authorize **`https://zagginventorymanager.com`** as a JavaScrip
 - `server/Inventory.Api`: ASP.NET Core 10 API and web interface
 - `deploy`: Docker Compose, Ubuntu installer, PostgreSQL backup timer
 - `docs`: architecture and deployment notes
+
+## Documentation and visual/camera quality assurance
+
+- [Complete installation, deployment, OAuth, backups, restore and operational handover](docs/COMPLETE_DEPLOYMENT_GUIDE.md)
+- [Deployment quick reference](docs/deployment.md)
+- [Current architecture and security limitations](docs/architecture.md)
 
 ## Visual and camera quality assurance
 See [docs/ui-qa-checklist.md](docs/ui-qa-checklist.md) for the full mobile, desktop, accessibility, barcode, administrator and production acceptance checklist. The UI and scanner static regression checks run in GitHub Actions, but real-device camera speed and production readiness must be validated on the deployed server.
@@ -66,7 +77,7 @@ This repository is **not yet certified for production deployment**. Verify the C
 ## Backup
 Backups are saved to `/var/backups/inventory-manager` daily at 03:15 local time and retained for 14 days. Back up this directory outside the LXC and test restoring before relying on it.
 
-No employee accounts, invoicing, accounting or offline edits in v1.
+Employee/store accounts are supported. Invoicing, accounting and offline edits are not provided in the current version.
 
 ## Low-stock email alerts: one global sender, separate store recipients
 
