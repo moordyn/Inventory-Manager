@@ -56,6 +56,12 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] Enabling reduced-motion prevents animated rendering and leaves a readable static theme-based background.
 - [ ] Test on desktop Chrome/Firefox and iOS Safari, including touch, resizing, keyboard-only login and battery/performance behavior.
 
+## Mobile theme consistency
+
+- [ ] On Deep Purple, mobile Recent Activity, Recent Inventory, checkout history, reorder cards and audit entries use purple-toned surfaces rather than navy/blue.
+- [ ] Switching among all ten themes recolors these inner mobile cards and the bottom navigation bar consistently.
+- [ ] Glacier Light retains readable pale mobile cards with dark text; controls and note-action links remain visible.
+
 ## Ten themes and brand identity
 
 - [ ] Evergreen, Deep Purple, Midnight Ocean, Copper Ember, Rose Noir, Arctic Slate, Forest Night, Champagne Gold, Crimson Night and Glacier Light are available under Settings → Appearance for **every** authenticated employee.
