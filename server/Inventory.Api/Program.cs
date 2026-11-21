@@ -77,6 +77,66 @@ app.MapPost("/api/auth/logout", async (HttpContext ctx) =>
     await cmd.ExecuteNonQueryAsync();
     return Results.Ok();
 });
+
+async Task<(string store,string employee,bool admin)?> Identity(HttpContext ctx)
+{
+    var auth=ctx.Request.Headers.Authorization.ToString();
+    if(!auth.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase))return null;
+    var token=auth[7..].Trim();
+    if(token.Length!=64)return null;
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT store_id,employee_id,is_admin FROM sessions WHERE token_hash=@hash AND expires_at>now()",c);
+    cmd.Parameters.AddWithValue("hash",Hash(token));
+    await using var reader=await cmd.ExecuteReaderAsync();
+    if(!await reader.ReadAsync())return null;
+    return(reader.GetString(0),reader.GetString(1),reader.GetBoolean(2));
+}
+app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);
+    return who is null?Results.Unauthorized():Results.Ok(new{storeId=who.Value.store,employeeId=who.Value.employee,isAdmin=who.Value.admin});
+});
+app.MapPost("/api/auth/employee-login",async (EmployeeLogin req)=>{
+    if(string.IsNullOrWhiteSpace(req.StoreId)||string.IsNullOrWhiteSpace(req.EmployeeId))return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees e JOIN stores s ON s.id=e.store_id WHERE e.store_id=@store AND e.id=@employee AND e.active AND s.active)",c);
+    cmd.Parameters.AddWithValue("store",req.StoreId.Trim());cmd.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
+    if(!(bool)(await cmd.ExecuteScalarAsync()??false))return Results.Unauthorized();
+    var token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+    await using var insert=new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) VALUES(@hash,now()+interval '8 hours',@store,@employee,false)",c);
+    insert.Parameters.AddWithValue("hash",Hash(token));insert.Parameters.AddWithValue("store",req.StoreId.Trim());insert.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
+    await insert.ExecuteNonQueryAsync();
+    return Results.Ok(new{token});
+}).RequireRateLimiting("auth");
+app.MapGet("/api/admin/stores",async (HttpContext ctx)=>{
+    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT id,name,active FROM stores ORDER BY id",c);
+    await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
+    while(await r.ReadAsync())list.Add(new{id=r.GetString(0),name=r.GetString(1),active=r.GetBoolean(2)});
+    return Results.Ok(list);
+});
+app.MapPost("/api/admin/stores",async (HttpContext ctx,StoreRequest req)=>{
+    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid store details");
+    await using var c=await Connect();await using var cmd=new NpgsqlCommand("INSERT INTO stores(id,name) VALUES(@id,@name)",c);
+    cmd.Parameters.AddWithValue("id",req.Id.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
+    await cmd.ExecuteNonQueryAsync();return Results.Ok(new{created=true});
+});
+app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
+    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT store_id,id,name,active FROM employees ORDER BY store_id,id",c);
+    await using var r=await cmd.ExecuteReaderAsync();var list=new List<object>();
+    while(await r.ReadAsync())list.Add(new{storeId=r.GetString(0),id=r.GetString(1),name=r.GetString(2),active=r.GetBoolean(3)});
+    return Results.Ok(list);
+});
+app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>{
+    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.StoreId)||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid employee details");
+    await using var c=await Connect();await using var cmd=new NpgsqlCommand("INSERT INTO employees(store_id,id,name) VALUES(@store,@id,@name)",c);
+    cmd.Parameters.AddWithValue("store",req.StoreId.Trim());cmd.Parameters.AddWithValue("id",req.Id.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
+    await cmd.ExecuteNonQueryAsync();return Results.Ok(new{created=true});
+});
+
 app.MapGet("/api/items", async (HttpContext ctx) =>
 {
     if (!await Authed(ctx)) return Results.Unauthorized();
@@ -217,3 +277,7 @@ record Login(string? Pin);
 record NewItem(string Sku,string Name,int Quantity,string? Barcode="",string? Category="",string? Description="",int MinStock=0,decimal? UnitCost=null);
 record MovementRequest(int Delta,string? Note,Guid IdempotencyKey);
 record EditItem(string Sku,string Name,string? Barcode,string? Category,string? Description,int MinStock,decimal? UnitCost);
+
+record EmployeeLogin(string? StoreId,string? EmployeeId);
+record StoreRequest(string? Id,string? Name);
+record EmployeeRequest(string? StoreId,string? Id,string? Name);
