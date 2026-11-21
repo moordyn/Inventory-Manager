@@ -112,6 +112,7 @@ jobs:
           }
           // Domain belongs to the installer, not this repository's maintainer.
           if (!backend.includes('Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")') ||
+              !backend.includes('Uri.TryCreate(publicOriginText,UriKind.Absolute') ||
               !backend.includes('var GoogleRedirect=PublicOrigin+"/api/google/callback";') ||
               !backend.includes('x.GetString()==PublicOrigin')) {
             throw new Error('Google OAuth callback and import validation must use configurable PUBLIC_ORIGIN');
@@ -123,7 +124,9 @@ jobs:
               !importer.includes('expected_callback = public_origin + "/api/google/callback"') ||
               !importer.includes('public_origin not in origins') ||
               !installer.includes('PUBLIC_ORIGIN=%s') ||
-              !compose.includes('PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-')) {
+              !compose.includes('PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:?') ||
+              backend.includes('https://zagginventorymanager.com') ||
+              importer.includes('https://zagginventorymanager.com')) {
             throw new Error('Bring-your-own-domain installer, Compose or Google import is not wired correctly');
           }
           for (const marker of [
