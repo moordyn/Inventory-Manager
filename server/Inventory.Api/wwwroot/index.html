@@ -92,7 +92,7 @@ const time=x=>new Date(x).toLocaleString();
 const toast=(message,error=false)=>{const el=$('toast');el.textContent=message;el.className='toast'+(error?' error':'');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.add('hidden'),4500)};
 async function api(path,method='GET',data){const response=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(data!==undefined?{body:JSON.stringify(data)}:{})});if(!response.ok){let text=await response.text();if(response.status===401&&token){logout(false)}throw Error(response.status===429?'Too many attempts. Wait five minutes.':(text.slice(0,220)||('HTTP '+response.status+' — check API logs')))}return response.status===204?null:response.json()}
 function authScreen(which){$('auth').classList.remove('hidden');$('app').classList.add('hidden');for(const name of ['setup','login','employeeLogin'])$(name).classList.toggle('hidden',name!==which)}
-async function enter(){try{identity=await api('auth/me');$('signedInEmployee').textContent=identity.employeeName||identity.employeeId;$('signedInEmployeeId').textContent='Employee ID: '+identity.employeeId;allowedStores=identity.isGlobalAdmin?await api('admin/stores'):await api('auth/stores');$('adminNav').classList.toggle('hidden',!identity.isAdmin);$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;renderStorePicker();updateLocationBrand();navigate('overview');startIdleTimer();await load()}catch(e){logout(false)}}
+async function enter(){try{identity=await api('auth/me');$('signedInEmployee').textContent=identity.employeeName||identity.employeeId;$('signedInEmployeeId').textContent='Employee ID: '+identity.employeeId;$('mobileEmployeeName').textContent=identity.employeeName||identity.employeeId;allowedStores=identity.isGlobalAdmin?await api('admin/stores'):await api('auth/stores');$('adminNav').classList.toggle('hidden',!identity.isAdmin);$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;renderStorePicker();updateLocationBrand();navigate('overview');startIdleTimer();await load()}catch(e){logout(false)}}
 const IDLE_LIMIT_MS=30000;
 let lastUserActivity=Date.now(),idleTimer=null;
 function resetIdleTimer(){if(!token||$('app').classList.contains('hidden'))return;lastUserActivity=Date.now();}
@@ -103,9 +103,9 @@ function startIdleTimer(){
    if(!token||$('app').classList.contains('hidden'))return;
    const remaining=IDLE_LIMIT_MS-(Date.now()-lastUserActivity);
    if(remaining<=0){logout();return;}
-   $('idleCountdown').textContent='Auto sign-out in '+Math.ceil(remaining/1000)+'s';
+   $('idleCountdown').textContent='Auto sign-out in '+Math.ceil(remaining/1000)+'s';$('mobileIdleCountdown').textContent=Math.ceil(remaining/1000)+'s until sign-out';
  },500);
- $('idleCountdown').textContent='Auto sign-out in 30s';
+ $('idleCountdown').textContent='Auto sign-out in 30s';$('mobileIdleCountdown').textContent='30s until sign-out';
 }
 for(const eventName of ['pointerdown','pointermove','keydown','touchstart','wheel','scroll']){
  document.addEventListener(eventName,event=>{if(event.isTrusted)resetIdleTimer()},{passive:true});
@@ -119,7 +119,7 @@ function logout(send=true){
  token='';identity=null;allowedStores=[];items=[];history=[];
  sessionStorage.removeItem('inventory-token');
  $('app').classList.add('hidden');$('auth').classList.remove('hidden');
- $('signedInEmployee').textContent='—';$('signedInEmployeeId').textContent='—';
+ $('signedInEmployee').textContent='—';$('signedInEmployeeId').textContent='—';$('mobileEmployeeName').textContent='Employee';$('mobileIdleCountdown').textContent='';
  authScreen('employeeLogin');
 }
 async function initialize(){try{const state=await api('auth/status');if(!state.initialized)authScreen('setup');else if(token)enter();else authScreen('employeeLogin')}catch(e){$('authMsg').textContent='Unable to connect to server: '+e.message}}
@@ -141,7 +141,7 @@ function openMovement(item){modal('Update stock · '+item.name,'<form id="moveFo
 async function movement(id,delta,note){if(busy)return;busy=true;try{await api('items/'+id+'/movements','POST',{delta,note,idempotencyKey:crypto.randomUUID()});toast('Stock updated successfully');await load()}catch(err){toast(err.message,true)}finally{busy=false}}
 for(const dir of ['checkin','checkout'])$(dir+'Form').onsubmit=async e=>{e.preventDefault();const id=$(dir+'Item').value,qty=Number($(dir+'Qty').value);if(!id||!Number.isSafeInteger(qty)||qty<1)return toast('Select a product and positive quantity',true);if(dir==='checkout'&&!$(dir+'Note').value.trim())return toast('Checkout reason is required',true);await movement(id,qty*(dir==='checkin'?1:-1),$(dir+'Note').value);$(dir+'Note').value='';$(dir+'Qty').value='1'};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-edit]');if(b){const item=items.find(x=>x.id===b.dataset.edit);if(item)openItem(item)}});
-$('newItemBtn').onclick=()=>openItem();$('logoutBtn').onclick=()=>logout();$('sidebarLogoutBtn').onclick=()=>logout();$('refreshBtn').onclick=load;
+$('newItemBtn').onclick=()=>openItem();$('logoutBtn').onclick=()=>logout();$('sidebarLogoutBtn').onclick=()=>logout();$('mobileLogoutBtn').onclick=()=>logout();$('refreshBtn').onclick=load;
 $('exportBtn').onclick=()=>{const rows=[['ID','Store','Employee','SKU','Name','Change','Before','After','Timestamp','Note'],...history.map(x=>[x.id,x.storeId||'',x.employeeId||'LEGACY',x.sku,x.name,x.delta,x.before,x.after,x.time,x.note||''])];const csv=rows.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='inventory-history.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 async function scanResult(code){$('globalScan').value=code;const found=items.find(x=>x.sku.toLowerCase()===code.toLowerCase()||x.barcode?.toLowerCase()===code.toLowerCase());if(found){openMovement(found)}else{try{const remote=await api('items/lookup/'+encodeURIComponent(code));openMovement(items.find(x=>x.id===remote.id)||remote)}catch{openItem(null,code)}}}
 $('cameraBtn').onclick=async()=>{
@@ -212,7 +212,7 @@ $('employeeForm').onsubmit=async e=>{e.preventDefault();try{token=(await api('au
 
 function updateLocationBrand(){
  const current=allowedStores.find(x=>x.id===identity?.storeId);
- $('locationBrand').textContent=current?.name||identity?.storeId||'Inventory Manager';
+ $('locationBrand').textContent=current?.name||identity?.storeId||'Inventory Manager';$('mobileLocationName').textContent=current?.name||identity?.storeId||'Store';
 }
 function renderStorePicker(){
  const wrap=$('storePickerWrap'),select=$('storePicker');
@@ -236,10 +236,16 @@ async function loadAdmin(){
  try{
   const [stores,employees,access]=await Promise.all([identity.isGlobalAdmin?api('admin/stores'):api('auth/stores'),api('admin/employees'),api('admin/employee-access')]);
   adminStores=stores;adminEmployees=employees;adminAccess=access;
+  const storeOptions=stores.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+' ('+esc(x.id)+')</option>').join('');
+  const employeeOptions=employees.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+' ('+esc(x.id)+')</option>').join('');
+  for(const id of ['empStore','grantStore']){const el=$(id),value=el.value;el.innerHTML='<option value="" disabled selected>Select location</option>'+storeOptions;if(stores.some(x=>x.id===value))el.value=value;}
+  {const el=$('grantEmployee'),value=el.value;el.innerHTML='<option value="" disabled selected>Select employee</option>'+employeeOptions;if(employees.some(x=>x.id===value))el.value=value;}
+  $('createStoreDetails').classList.toggle('hidden',!identity.isGlobalAdmin);
+
   $('storeForm').classList.toggle('hidden',!identity.isGlobalAdmin);
   $('storesList').innerHTML='<table><thead><tr><th>Store ID</th><th>Location Name</th><th>Status</th><th>Manage</th></tr></thead><tbody>'+stores.map(x=>'<tr><td><strong>'+esc(x.id)+'</strong></td><td>'+esc(x.name)+'</td><td>'+(x.active===false?'Inactive':'Active')+'</td><td>'+(identity.isGlobalAdmin?'<button type="button" class="btn" data-edit-store="'+esc(x.id)+'">Edit</button>':'—')+'</td></tr>').join('')+'</tbody></table>';
-  $('accessList').innerHTML=access.map(x=>'<p>'+esc(x.employeeId)+' → '+esc(x.storeId)+(x.role==='store_admin'?' (Store Admin)':'')+'</p>').join('');
-  $('employeesList').innerHTML=employees.map(x=>'<div style="display:flex;align-items:center;gap:12px;margin:10px 0"><span style="flex:1">'+esc(x.name)+' ('+esc(x.id)+')'+(x.globalAdmin?' · Global Admin':'')+'</span>'+(identity.isGlobalAdmin?'<button type="button" class="btn" data-permission-employee="'+esc(x.id)+'">Permissions</button>':'')+'</div>').join('');
+  $('accessList').innerHTML=access.length?access.map(x=>'<div class="employee-row"><span>'+esc(employees.find(e=>e.id===x.employeeId)?.name||x.employeeId)+'</span><span class="muted">'+esc(stores.find(st=>st.id===x.storeId)?.name||x.storeId)+(x.role==='store_admin'?' · Admin':'')+'</span></div>').join(''):'<p class="muted">No assignments found.</p>';
+  $('employeesList').innerHTML=employees.length?employees.map(x=>'<div class="employee-row"><div><strong>'+esc(x.name)+'</strong><div class="muted" style="font-size:12px;margin:3px 0">ID '+esc(x.id)+' · '+esc(stores.find(st=>st.id===x.storeId)?.name||x.storeId)+'</div><span class="role-pill '+(x.globalAdmin?'':'neutral')+'">'+(x.globalAdmin?'Global administrator':access.some(a=>a.employeeId===x.id&&a.role==='store_admin')?'Store administrator':'Employee')+'</span></div>'+(identity.isGlobalAdmin?'<button type="button" class="btn" data-permission-employee="'+esc(x.id)+'">Manage access</button>':'')+'</div>').join(''):'<div class="empty">No employees yet. Add your first employee below.</div>';
   if(selectedPermissionEmployee&&identity.isGlobalAdmin)showEmployeePermissions(selectedPermissionEmployee);
  }catch(e){toast(e.message,true)}
 }
@@ -255,7 +261,8 @@ function showEmployeePermissions(id){
  $('adminLocations').innerHTML=adminStores.map(x=>'<label style="display:flex;align-items:center;gap:10px"><input type="checkbox" class="admin-store-checkbox" value="'+esc(x.id)+'" style="width:auto" '+(selected.includes(x.id)?'checked':'')+'> '+esc(x.name)+'</label>').join('');
  $('adminLocations').classList.toggle('hidden',!$('storeAdminToggle').checked);
 }
-$('employeesList').onclick=e=>{const b=e.target.closest('[data-permission-employee]');if(b)showEmployeePermissions(b.dataset.permissionEmployee)};
+$('employeesList').onclick=e=>{const b=e.target.closest('[data-permission-employee]');if(b){showEmployeePermissions(b.dataset.permissionEmployee);$('permissionsForm').scrollIntoView({behavior:'smooth',block:'nearest'})}};
+$('closePermissionsBtn').onclick=()=>{$('permissionsForm').classList.add('hidden');selectedPermissionEmployee=null};
 $('storeAdminToggle').onchange=e=>$('adminLocations').classList.toggle('hidden',!e.target.checked);
 $('permissionsForm').onsubmit=async e=>{
  e.preventDefault();if(!selectedPermissionEmployee)return;
@@ -265,7 +272,7 @@ $('permissionsForm').onsubmit=async e=>{
   toast('Permissions updated');await loadAdmin();
  }catch(err){toast(err.message,true)}
 };
-$('assignStoreForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/employees/'+encodeURIComponent($('grantEmployee').value.trim())+'/stores','POST',{storeId:$('grantStore').value.trim()});e.target.reset();toast('Store access granted');loadAdmin()}catch(err){toast(err.message,true)}};
+$('assignStoreForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/employees/'+encodeURIComponent($('grantEmployee').value.trim())+'/stores','POST',{storeId:$('grantStore').value.trim()});e.target.reset();$('grantAccessDetails').open=false;toast('Store access granted');loadAdmin()}catch(err){toast(err.message,true)}};
 $('storesList').onclick=async e=>{
  const btn=e.target.closest('[data-edit-store]');if(!btn)return;
  const oldId=btn.dataset.editStore;
@@ -283,8 +290,8 @@ $('storesList').onclick=async e=>{
    toast('Store details updated');allowedStores=await api('admin/stores');updateLocationBrand();await loadAdmin();
  }catch(err){toast(err.message,true)}
 };
-$('storeForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/stores','POST',{id:$('newStoreId').value.trim(),name:$('newStoreName').value.trim()});e.target.reset();toast('Store created');loadAdmin()}catch(err){toast(err.message,true)}};
-$('employeeCreateForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/employees','POST',{storeId:$('empStore').value.trim(),id:$('empId').value.trim(),name:$('empName').value.trim()});e.target.reset();toast('Employee created');loadAdmin()}catch(err){toast(err.message,true)}};
+$('storeForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/stores','POST',{id:$('newStoreId').value.trim(),name:$('newStoreName').value.trim()});e.target.reset();$('createStoreDetails').open=false;toast('Store created');loadAdmin()}catch(err){toast(err.message,true)}};
+$('employeeCreateForm').onsubmit=async e=>{e.preventDefault();try{await api('admin/employees','POST',{storeId:$('empStore').value.trim(),id:$('empId').value.trim(),name:$('empName').value.trim()});e.target.reset();$('createEmployeeDetails').open=false;toast('Employee created');loadAdmin()}catch(err){toast(err.message,true)}};
 
 window.addEventListener('online',load);setInterval(()=>{if(token&&!document.hidden)load()},20000);initialize();
 </script></body></html>
