@@ -13,7 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = 429;
-    options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
+    options.AddPolicy("sensitive", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(5), QueueLimit = 0 }));
 });
@@ -40,6 +40,52 @@ async Task<bool> Authed(HttpContext ctx)
     cmd.Parameters.AddWithValue("h", Hash(token));
     return (bool)(await cmd.ExecuteScalarAsync() ?? false);
 }
+
+const int MaxFailedSignIns=5;
+// Per-IP, per-login-type counters are persisted so API restarts do not clear lockouts.
+// Successful authentication deletes the record; successful requests never increment it.
+string SignInAttemptKey(HttpContext ctx,string kind)=>Hash(kind+":"+(ctx.Connection.RemoteIpAddress?.ToString()??"unknown"));
+async Task<int> RemainingSignInLockSeconds(HttpContext ctx,string kind){
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("""
+        SELECT GREATEST(0,CEIL(EXTRACT(EPOCH FROM (blocked_until-now()))))::integer
+        FROM auth_login_failures WHERE attempt_key=@key AND blocked_until>now()
+        """,c);
+    cmd.Parameters.AddWithValue("key",SignInAttemptKey(ctx,kind));
+    return (int?)await cmd.ExecuteScalarAsync()??0;
+}
+IResult SignInLocked(HttpContext ctx,int seconds){
+    ctx.Response.Headers.RetryAfter=seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    return Results.Json(new{error="Too many failed sign-in attempts.",retryAfterSeconds=seconds},statusCode:429);
+}
+async Task<IResult?> CheckSignInLock(HttpContext ctx,string kind){
+    var remaining=await RemainingSignInLockSeconds(ctx,kind);
+    return remaining>0?SignInLocked(ctx,remaining):null;
+}
+async Task<IResult> RejectedSignIn(HttpContext ctx,string kind){
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("""
+        INSERT INTO auth_login_failures(attempt_key,failures,last_failure,blocked_until)
+        VALUES(@key,1,now(),NULL)
+        ON CONFLICT(attempt_key) DO UPDATE SET
+          failures=CASE WHEN auth_login_failures.last_failure < now()-interval '5 minutes'
+                        THEN 1 ELSE auth_login_failures.failures+1 END,
+          last_failure=now(),
+          blocked_until=CASE WHEN auth_login_failures.last_failure < now()-interval '5 minutes' THEN NULL
+                        WHEN auth_login_failures.failures+1>=5 THEN now()+interval '5 minutes'
+                        ELSE NULL END
+        RETURNING GREATEST(0,CEIL(EXTRACT(EPOCH FROM (blocked_until-now()))))::integer
+        """,c);
+    cmd.Parameters.AddWithValue("key",SignInAttemptKey(ctx,kind));
+    var seconds=(int)(await cmd.ExecuteScalarAsync()??0);
+    return seconds>0?SignInLocked(ctx,seconds):Results.Unauthorized();
+}
+async Task SignInSucceeded(HttpContext ctx,string kind){
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("DELETE FROM auth_login_failures WHERE attempt_key=@key",c);
+    cmd.Parameters.AddWithValue("key",SignInAttemptKey(ctx,kind));
+    await cmd.ExecuteNonQueryAsync();
+}
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/auth/status", async () =>
 {
@@ -56,27 +102,31 @@ app.MapPost("/api/auth/setup", async (Setup request) =>
     await using var cmd = new NpgsqlCommand("INSERT INTO settings (key,value) VALUES ('pin',@v) ON CONFLICT DO NOTHING", c);
     cmd.Parameters.AddWithValue("v", Convert.ToHexString(salt) + ":" + PinHash(request.Pin!, salt));
     return await cmd.ExecuteNonQueryAsync() == 1 ? Results.Ok(new { created = true }) : Results.Conflict("PIN already configured.");
-}).RequireRateLimiting("auth");
-app.MapPost("/api/auth/login", async (Login request) =>
+}).RequireRateLimiting("sensitive");
+app.MapPost("/api/auth/login", async (HttpContext ctx,Login request) =>
 {
-    if (!PinValid(request.Pin)) return Results.Unauthorized();
-    await using var c = await Connect();
-    await using var cmd = new NpgsqlCommand("SELECT value FROM settings WHERE key='pin'", c);
-    var stored = (string?)await cmd.ExecuteScalarAsync();
-    if (stored is null) return Results.Conflict("Initial setup required.");
-    var parts = stored.Split(':');
-    if (parts.Length != 2 || !Equal(PinHash(request.Pin!, Convert.FromHexString(parts[0])), parts[1])) return Results.Unauthorized();
+    var locked=await CheckSignInLock(ctx,"admin");
+    if(locked is not null)return locked;
+    if(!PinValid(request.Pin))return await RejectedSignIn(ctx,"admin");
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("SELECT value FROM settings WHERE key='pin'",c);
+    var stored=(string?)await cmd.ExecuteScalarAsync();
+    if(stored is null)return Results.Conflict("Initial setup required.");
+    var parts=stored.Split(':');
+    if(parts.Length!=2||!Equal(PinHash(request.Pin!,Convert.FromHexString(parts[0])),parts[1]))
+        return await RejectedSignIn(ctx,"admin");
     var employeeId=string.IsNullOrWhiteSpace(request.EmployeeId)?"OWNER":request.EmployeeId.Trim();
     await using(var check=new NpgsqlCommand("SELECT count(*) FROM employees WHERE id=@employee AND active AND global_admin",c)){
         check.Parameters.AddWithValue("employee",employeeId);
-        if((long)(await check.ExecuteScalarAsync()??0L)!=1)return Results.Unauthorized();
+        if((long)(await check.ExecuteScalarAsync()??0L)!=1)return await RejectedSignIn(ctx,"admin");
     }
-    var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-    await using var insert = new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) SELECT @h,now()+interval '8 hours',e.primary_store_id,e.id,true FROM employees e WHERE e.id=@employee AND e.global_admin AND e.active LIMIT 1", c);
-    insert.Parameters.AddWithValue("h", Hash(token));insert.Parameters.AddWithValue("employee",employeeId);
-    if(await insert.ExecuteNonQueryAsync()!=1)return Results.Unauthorized();
-    return Results.Ok(new { token });
-}).RequireRateLimiting("auth");
+    var token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+    await using var insert=new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) SELECT @h,now()+interval '8 hours',e.primary_store_id,e.id,true FROM employees e WHERE e.id=@employee AND e.global_admin AND e.active LIMIT 1",c);
+    insert.Parameters.AddWithValue("h",Hash(token));insert.Parameters.AddWithValue("employee",employeeId);
+    if(await insert.ExecuteNonQueryAsync()!=1)return await RejectedSignIn(ctx,"admin");
+    await SignInSucceeded(ctx,"admin");
+    return Results.Ok(new{token});
+});
 app.MapPost("/api/auth/logout", async (HttpContext ctx) =>
 {
     if (!await Authed(ctx)) return Results.Unauthorized();
@@ -116,23 +166,26 @@ app.MapGet("/api/auth/me",async (HttpContext ctx)=>{
     var employeeName=(string?)await cmd.ExecuteScalarAsync()??who.Value.employee;
     return Results.Ok(new{storeId=who.Value.store,employeeId=who.Value.employee,employeeName,isAdmin=who.Value.admin,isGlobalAdmin=who.Value.globalAdmin});
 });
-app.MapPost("/api/auth/employee-login",async (EmployeeLogin req)=>{
-    if(string.IsNullOrWhiteSpace(req.EmployeeId))return Results.Unauthorized();
+app.MapPost("/api/auth/employee-login",async (HttpContext ctx,EmployeeLogin req)=>{
+    var locked=await CheckSignInLock(ctx,"employee");
+    if(locked is not null)return locked;
+    if(string.IsNullOrWhiteSpace(req.EmployeeId))return await RejectedSignIn(ctx,"employee");
     await using var c=await Connect();
     await using var cmd=new NpgsqlCommand("SELECT a.store_id FROM employee_store_access a JOIN employees e ON e.id=a.employee_id JOIN stores s ON s.id=a.store_id WHERE a.employee_id=@employee AND e.active AND s.active ORDER BY CASE WHEN a.store_id=e.primary_store_id THEN 0 ELSE 1 END,a.store_id LIMIT 1",c);
     cmd.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
     await using(var count=new NpgsqlCommand("SELECT count(*) FROM employees WHERE id=@employee AND active",c)){
         count.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
-        if((long)(await count.ExecuteScalarAsync()??0L)!=1)return Results.Unauthorized();
+        if((long)(await count.ExecuteScalarAsync()??0L)!=1)return await RejectedSignIn(ctx,"employee");
     }
     var store=(string?)await cmd.ExecuteScalarAsync();
-    if(store is null)return Results.Unauthorized();
+    if(store is null)return await RejectedSignIn(ctx,"employee");
     var token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     await using var insert=new NpgsqlCommand("INSERT INTO sessions(token_hash,expires_at,store_id,employee_id,is_admin) VALUES(@hash,now()+interval '8 hours',@store,@employee,false)",c);
     insert.Parameters.AddWithValue("hash",Hash(token));insert.Parameters.AddWithValue("store",store);insert.Parameters.AddWithValue("employee",req.EmployeeId.Trim());
     await insert.ExecuteNonQueryAsync();
+    await SignInSucceeded(ctx,"employee");
     return Results.Ok(new{token});
-}).RequireRateLimiting("auth");
+});
 app.MapGet("/api/auth/stores",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     await using var c=await Connect();
@@ -407,7 +460,7 @@ app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthI
     googleCredentials=new GoogleOAuthCredentials(clientId,clientSecret);
     app.Logger.LogInformation("Global administrator {Admin} updated Google OAuth client configuration",who.Value.employee);
     return Results.Ok(new{configured=true,clientId});
-}).RequireRateLimiting("auth");
+}).RequireRateLimiting("sensitive");
 
 app.MapPost("/api/google/connect",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
@@ -688,6 +741,7 @@ await using (var c=await Connect())
 {
     await using var cmd=new NpgsqlCommand("""
     CREATE TABLE IF NOT EXISTS settings(key text PRIMARY KEY,value text NOT NULL);
+    CREATE TABLE IF NOT EXISTS auth_login_failures(attempt_key text PRIMARY KEY,failures integer NOT NULL,last_failure timestamptz NOT NULL,blocked_until timestamptz);
     CREATE TABLE IF NOT EXISTS stores(id text PRIMARY KEY,name text NOT NULL,active boolean NOT NULL DEFAULT true);
     CREATE TABLE IF NOT EXISTS store_alert_settings(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,enabled boolean NOT NULL DEFAULT false,recipients text NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS google_store_accounts(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,email text NOT NULL,refresh_token text NOT NULL,connected_by text NOT NULL,connected_at timestamptz NOT NULL DEFAULT now());
