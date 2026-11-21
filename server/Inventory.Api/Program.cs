@@ -424,6 +424,36 @@ app.MapPost("/api/auth/token-info",async (AuthEmailToken req)=>{
     return Results.Ok(new{employeeId=r.GetString(0),purpose=r.GetString(1),expiresAt=r.GetDateTime(2)});
 }).RequireRateLimiting("sensitive");
 
+app.MapPost("/api/auth/change-email",async (HttpContext ctx,ChangeEmail req)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!EmailPairValid(req.Email,req.ConfirmEmail))return Results.BadRequest("New email and confirmation must match and be valid.");
+    if(!await AccountMailReady())return Results.Problem("Email sender is not configured.",statusCode:503);
+    var email=req.Email!.Trim().ToLowerInvariant();
+    await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
+    string? oldEmail,storedPassword;
+    await using(var cmd=new NpgsqlCommand("SELECT email,password_hash FROM employees WHERE id=@id AND active FOR UPDATE",c,tx)){
+        cmd.Parameters.AddWithValue("id",who.Value.employee);
+        await using var reader=await cmd.ExecuteReaderAsync();
+        if(!await reader.ReadAsync())return Results.Unauthorized();
+        oldEmail=reader.IsDBNull(0)?null:reader.GetString(0);
+        storedPassword=reader.IsDBNull(1)?null:reader.GetString(1);
+    }
+    if(!PasswordMatches(req.Password,storedPassword))return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if(string.Equals(email,oldEmail,StringComparison.OrdinalIgnoreCase))return Results.BadRequest("This is already your email.");
+    await using(var check=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE lower(email)=@email AND id<>@id)",c,tx)){
+        check.Parameters.AddWithValue("email",email);check.Parameters.AddWithValue("id",who.Value.employee);
+        if((bool)(await check.ExecuteScalarAsync()??false))return Results.Conflict("Email is already in use.");
+    }
+    string raw;
+    try{raw=await CreateAccountEmailToken(c,(NpgsqlTransaction)tx,who.Value.employee,email,"change_email",null,30);}
+    catch(InvalidOperationException ex){return Results.Conflict(ex.Message);}
+    var link=(Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")??"")+"/?authToken="+raw;
+    try{await SendAccountEmail(email,"Confirm your new Inventory Manager email",
+      "Confirm the new email for employee "+who.Value.employee+":\n"+link+"\n\nThis link expires in 30 minutes.");}
+    catch(Exception ex){app.Logger.LogWarning(ex,"Email change link delivery failed");return Results.Problem("Unable to send verification. Existing email unchanged.",statusCode:503);}
+    await tx.CommitAsync();return Results.Ok(new{sent=true,message="Check your new email for a confirmation link. Old email stays active until confirmed."});
+}).RequireRateLimiting("sensitive");
+
 // Atomic consumption: the token cannot be used again even if two tabs submit together.
 app.MapPost("/api/auth/complete-token",async (CompleteAuthToken req)=>{
     if(!Regex.IsMatch(req.Token??"",@"^[0-9A-Fa-f]{64}$"))return Results.BadRequest("Invalid or expired link.");
@@ -456,6 +486,10 @@ app.MapPost("/api/auth/complete-token",async (CompleteAuthToken req)=>{
             UPDATE employees SET password_hash=@password,password_updated_at=now()
             WHERE id=@id AND active AND lower(email)=@email AND email_verified_at IS NOT NULL
             """,
+        "change_email"=>"""
+            UPDATE employees SET email=@email,email_verified_at=now(),bootstrap_provisional=false
+            WHERE id=@id AND active AND password_hash IS NOT NULL
+            """,
         _=>throw new InvalidOperationException("Unknown email token purpose")
     };
     if(purpose=="activate"&&string.IsNullOrWhiteSpace(pendingHash))return Results.BadRequest("Invalid activation link.");
@@ -468,12 +502,14 @@ app.MapPost("/api/auth/complete-token",async (CompleteAuthToken req)=>{
     }catch(PostgresException ex)when(ex.SqlState=="23505"){return Results.Conflict("That email address is already registered.");}
     await using var clearTokens=new NpgsqlCommand("DELETE FROM auth_email_tokens WHERE employee_id=@id",c,tx);
     clearTokens.Parameters.AddWithValue("id",employee);await clearTokens.ExecuteNonQueryAsync();
-    if(purpose=="reset"){
+    if(purpose=="reset"||purpose=="change_email"){
         await using var clearSessions=new NpgsqlCommand("DELETE FROM sessions WHERE employee_id=@id",c,tx);
         clearSessions.Parameters.AddWithValue("id",employee);await clearSessions.ExecuteNonQueryAsync();
     }
+    if(purpose=="change_email")
+        await WriteAdminAudit(c,(NpgsqlTransaction)tx,employee,null,"account.email_changed",employee,"Verified new email address");
     await tx.CommitAsync();
-    return Results.Ok(new{completed=true,purpose,message=purpose=="reset"?"Password changed. Sign in with your new password.":"Email verified. You may now sign in."});
+    return Results.Ok(new{completed=true,purpose,message=purpose=="reset"?"Password changed. Sign in with your new password.":purpose=="change_email"?"Email changed. Sign in again.":"Email verified. You may now sign in."});
 }).RequireRateLimiting("sensitive");
 app.MapGet("/api/auth/stores",async (HttpContext ctx)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
@@ -591,6 +627,41 @@ app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>
     access.Parameters.AddWithValue("employee",req.Id.Trim());access.Parameters.AddWithValue("store",req.StoreId.Trim());await access.ExecuteNonQueryAsync();
     await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,req.StoreId!.Trim(),"employee.created",req.Id!.Trim(),req.Name!.Trim());
     await tx.CommitAsync();return Results.Ok(new{created=true});
+});
+
+app.MapPut("/api/admin/employees/{id}/id",async (HttpContext ctx,string id,ChangeEmployeeId req)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var newId=req.NewId?.Trim();
+    if(newId is null||!Regex.IsMatch(newId,@"^[A-Za-z0-9_-]{2,24}$"))
+        return Results.BadRequest("Employee ID must be 2–24 letters, numbers, underscores or hyphens.");
+    if(id=="OWNER"||newId=="OWNER")return Results.BadRequest("OWNER is a protected recovery ID.");
+    if(id==newId)return Results.BadRequest("New ID must differ.");
+    await using var c=await Connect();await using var tx=await c.BeginTransactionAsync();
+    await using(var check=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@id)",c,tx)){
+        check.Parameters.AddWithValue("id",newId);
+        if((bool)(await check.ExecuteScalarAsync()??false))return Results.Conflict("Employee ID already exists.");
+    }
+    await using(var change=new NpgsqlCommand("UPDATE employees SET id=@new WHERE id=@old",c,tx)){
+        change.Parameters.AddWithValue("new",newId);change.Parameters.AddWithValue("old",id);
+        if(await change.ExecuteNonQueryAsync()!=1)return Results.NotFound();
+    }
+    foreach(var (table,column) in new[]{
+        ("employee_store_access","employee_id"),("movements","employee_id"),
+        ("movements","note_updated_by"),("movement_note_edits","changed_by"),
+        ("items","deleted_by"),("auth_email_tokens","employee_id"),
+        ("google_oauth_states","employee_id"),("google_oauth_config","configured_by"),
+        ("google_store_accounts","connected_by"),("global_google_sender","connected_by")
+    }){
+        await using var cmd=new NpgsqlCommand($"UPDATE {table} SET {column}=@new WHERE {column}=@old",c,tx);
+        cmd.Parameters.AddWithValue("new",newId);cmd.Parameters.AddWithValue("old",id);
+        await cmd.ExecuteNonQueryAsync();
+    }
+    await using(var revoke=new NpgsqlCommand("DELETE FROM sessions WHERE employee_id=@id",c,tx)){
+        revoke.Parameters.AddWithValue("id",id);await revoke.ExecuteNonQueryAsync();
+    }
+    await WriteAdminAudit(c,(NpgsqlTransaction)tx,who.Value.employee,null,"employee.id_changed",newId,"Employee ID changed from "+id+" to "+newId);
+    await tx.CommitAsync();return Results.Ok(new{updated=true,employeeId=newId});
 });
 
 app.MapPost("/api/admin/employees/{id}/stores",async (HttpContext ctx,string id,SelectStore req)=>{
@@ -1410,6 +1481,8 @@ await using (var c=await Connect())
         expires_at timestamptz NOT NULL,
         PRIMARY KEY(employee_id,purpose)
     );
+    ALTER TABLE auth_email_tokens DROP CONSTRAINT IF EXISTS auth_email_tokens_purpose_check;
+    ALTER TABLE auth_email_tokens ADD CONSTRAINT auth_email_tokens_purpose_check CHECK (purpose IN ('activate','reset','verify','change_email'));
     CREATE INDEX IF NOT EXISTS auth_email_tokens_expiry_idx ON auth_email_tokens(expires_at);
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen_at timestamptz NOT NULL DEFAULT now();
     -- Every legacy PIN/ID-only bearer session is invalidated exactly once during migration.
@@ -1475,6 +1548,8 @@ app.Run();
 record Setup(string? SetupToken,string? Email,string? ConfirmEmail,string? Password,string? ConfirmPassword);
 record ActivateAccount(string? EmployeeId,string? Email,string? ConfirmEmail,string? Password,string? ConfirmPassword);
 record ForgotPassword(string? EmployeeId);
+record ChangeEmail(string? Email,string? ConfirmEmail,string? Password);
+record ChangeEmployeeId(string? NewId);
 record AuthEmailToken(string? Token);
 record CompleteAuthToken(string? Token,string? Password,string? ConfirmPassword);
 record NewItem(string Sku,string Name,int Quantity,string? Barcode="",string? Category="",string? Description="",int MinStock=0,decimal? UnitCost=null);
