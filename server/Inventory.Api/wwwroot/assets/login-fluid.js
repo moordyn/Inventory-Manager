@@ -301,7 +301,7 @@
       if(!lastBudget)lastBudget=now;
       inkBudget=Math.min(1.05,inkBudget+(now-lastBudget)*.00042);
       lastBudget=now;
-      const desired=Math.min(dragging?.19:.11,dist/(dragging?340:630));
+      const desired=Math.min(dragging ? .26 : .18,dist/(dragging ? 290 : 460));
       const amount=Math.min(desired,inkBudget);
       if(amount<.008)return;
       inkBudget-=amount;
@@ -310,8 +310,8 @@
         x:next.x,y:next.y,
         vx:Math.max(-.9,Math.min(.9,dx*velocity)),
         vy:Math.max(-.9,Math.min(.9,dy*velocity)),
-        color:colors[step%colors.length].map(v=>v*amount*(dragging?1.5:1.25)),
-        radius:dragging?.035:.028
+        color:colors[step%colors.length].map(v=>v*amount*(dragging ? 2.3 : 2.0)),
+        radius:dragging ? .040 : .031
       });
       if(queue.length>12)queue.shift();
     }
