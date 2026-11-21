@@ -50,10 +50,9 @@ Store administrators can configure email alerts for **their own store** in **Adm
    cd /opt/inventory-manager
    bash deploy/install.sh
    sudo bash deploy/configure-google.sh /root/google-oauth-client.json
-   docker compose --env-file .env -f deploy/compose.yml up -d --build
    ```
 
-   Replace the JSON filename with the actual private file path. The import script validates the redirect URL and securely adds `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and a persistent `GOOGLE_TOKEN_KEY` to the **gitignored** `.env` with file mode 600. The installer can generate a key as well; never overwrite the existing encryption key or connected accounts' refresh tokens will become unusable. Remove the imported source JSON from the server when no longer needed.
+   Replace the JSON filename with the actual private file path. The import script restarts the API, validates the redirect URL, and securely adds `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and a persistent `GOOGLE_TOKEN_KEY` to the **gitignored** `.env` with file mode 600. The installer can generate a key as well; never overwrite the existing encryption key or connected accounts' refresh tokens will become unusable. Remove the imported source JSON from the server when no longer needed.
 4. Visit the website, log in as an authorized store administrator, open **Administration → Low-stock email alerts**, and click **Connect Google Account**. Grant access to **send emails**; Google returns to the app. Fill in recipients, enable alerts, **Save email settings**, and **Send test email**.
 
 Google access tokens are refreshed using an encrypted, per-store refresh token in PostgreSQL; the encrypted value can only be decrypted using the persistent server key. The server does not need each store's Gmail password. Store admins can change or disconnect their own Google sender.
