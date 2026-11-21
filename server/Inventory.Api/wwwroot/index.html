@@ -413,6 +413,34 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px color-mix(in srgb,v
 .theme-swatch i{display:block;width:17px;height:17px;border-radius:50%;border:1px solid #ffffff40}
 .theme-option:hover{border-color:var(--accent)}
 
+/* Theme-driven search fields and hovered inventory rows. Keep one source of color truth. */
+.toolbar .search{
+  background:var(--input);
+  border-color:var(--line);
+  color:var(--text);
+}
+.toolbar .search::placeholder{color:var(--muted)}
+.toolbar .search:hover:not(:disabled){border-color:var(--active-border)}
+.toolbar .search:focus{border-color:var(--accent)}
+tbody tr:hover,
+body[data-theme="glacier"] tbody tr:hover,
+.inventory-responsive tbody tr:hover,
+.history-responsive tbody tr:hover,
+.reorder-responsive tbody tr:hover,
+.admin-table tbody tr:hover{
+  background:color-mix(in srgb,var(--accent) 12%,var(--panel));
+}
+@media (max-width:760px){
+  .inventory-responsive tbody tr:hover,
+  .history-responsive tbody tr:hover,
+  .reorder-responsive tbody tr:hover,
+  .admin-table tbody tr:hover{
+    background:color-mix(in srgb,var(--accent) 12%,var(--panel));
+    border-color:var(--active-border);
+  }
+}
+
+
 </style></head><body data-theme="mint">
 <div id="auth" class="login-screen"><div class="card login-card"><div class="brand brand-login"><img class="brand-wordmark brand-wordmark-login" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async" fetchpriority="high"></div><div id="setup" class="hidden">
  <h1>Set up your administrator account</h1>
