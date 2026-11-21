@@ -12,7 +12,7 @@ const {chromium}=require('playwright');
   '--enable-webgl','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'
  ]});
  try{
-  const page=await browser.newPage({viewport:{width:1100,height:720},deviceScaleFactor:1});
+  const page=await browser.newPage({viewport:{width:720,height:460},deviceScaleFactor:1});
   const warnings=[];
   page.on('console',m=>{if(m.type()==='warning'||m.type()==='error')warnings.push(m.text());});
   page.on('pageerror',e=>warnings.push(String(e)));
@@ -38,8 +38,8 @@ const {chromium}=require('playwright');
   assert.ok(!warnings.some(t=>/shader|framebuffer|unavailable|GLSL|SyntaxError/i.test(t)),
     'Fluid shader failed to initialize: '+warnings.join(' / '));
   const before=PNG.sync.read(await page.locator('#loginAurora').screenshot());
-  await page.mouse.move(110,190);
-  for(let i=0;i<30;i++)await page.mouse.move(120+i*24,190+Math.sin(i*.4)*95,{steps:2});
+  await page.mouse.move(70,130);
+  for(let i=0;i<9;i++)await page.mouse.move(90+i*55,130+Math.sin(i*.6)*55);
   await page.waitForTimeout(180);
   const after=PNG.sync.read(await page.locator('#loginAurora').screenshot());
   let changed=0,drawn=0;
@@ -58,8 +58,8 @@ const {chromium}=require('playwright');
     document.body.style.setProperty('--accent','#2d8fca');
     window.testFluid.start();
   });
-  await page.mouse.move(190,300);
-  for(let i=0;i<26;i++)await page.mouse.move(190+i*23,300+Math.cos(i*.3)*50,{steps:2});
+  await page.mouse.move(130,240);
+  for(let i=0;i<7;i++)await page.mouse.move(130+i*55,240+Math.cos(i*.6)*50);
   await page.waitForTimeout(160);
   await page.screenshot({path:'/tmp/login-fluid-glacier.png'});
   assert.ok(!warnings.some(t=>/shader|framebuffer|unavailable|GLSL|SyntaxError/i.test(t)),
