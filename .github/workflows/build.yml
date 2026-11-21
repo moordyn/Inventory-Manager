@@ -42,7 +42,7 @@ jobs:
           const repairs=fs.readFileSync('server/Inventory.Api/wwwroot/assets/repair-queue.js','utf8');
           new Function(repairs);
           for (const label of ['data-page="repairs"','id="view-repairs"','id="repairQueueList"',
-                                'id="repairNewBtn"','src="/assets/repair-queue.js?v=1"',
+                                'id="repairNewBtn"','src="/assets/repair-queue.js?v=2"',
                                 "window.RepairQueue?.open()", "window.RepairQueue?.reset()"]) {
             if (!html.includes(label)) throw new Error('Repair queue integration missing: '+label);
           }
