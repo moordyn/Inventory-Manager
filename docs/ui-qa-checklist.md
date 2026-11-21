@@ -49,6 +49,9 @@ These tests are required before calling a deployment production-ready. Automated
 
 ## Original sign-in aurora and accessibility
 
+- [ ] Login First-time setup/Forgot password and mobile Settings/Sign Out buttons use the active theme rather than fixed gray, red, or blue colors.
+- [ ] Login canvas glows and signed-in drifting clouds are visibly stronger while forms, mobile labels, and table content remain readable.
+
 - [ ] Sign-in, first-time setup, account activation, and password reset show theme-matched drifting soft glows behind the login card.
 - [ ] Moving the mouse creates a short, soft colored trail that expands and fades; movement works without clicking or dragging.
 - [ ] Sidebar and mobile **Sign Out** buttons follow each active theme instead of fixed warning colors.
