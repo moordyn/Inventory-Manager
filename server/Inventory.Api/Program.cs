@@ -149,6 +149,15 @@ app.MapPost("/api/admin/stores",async (HttpContext ctx,StoreRequest req)=>{
     cmd.Parameters.AddWithValue("id",req.Id.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
     await cmd.ExecuteNonQueryAsync();return Results.Ok(new{created=true});
 });
+app.MapPut("/api/admin/stores/{id}/name",async (HttpContext ctx,string id,StoreNameRequest req)=>{
+    if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
+    var name=req.Name?.Trim();
+    if(string.IsNullOrWhiteSpace(name)||name.Length>100)return Results.BadRequest("Location name must be 1–100 characters.");
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("UPDATE stores SET name=@name WHERE id=@id",c);
+    cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("name",name);
+    return await cmd.ExecuteNonQueryAsync()==1?Results.Ok(new{updated=true}):Results.NotFound();
+});
 app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
     await using var c=await Connect();await using var cmd=new NpgsqlCommand("SELECT primary_store_id,id,name,active FROM employees ORDER BY primary_store_id,id",c);
@@ -336,3 +345,5 @@ record EditItem(string Sku,string Name,string? Barcode,string? Category,string? 
 record EmployeeLogin(string? EmployeeId);\nrecord SelectStore(string? StoreId);
 record StoreRequest(string? Id,string? Name);
 record EmployeeRequest(string? StoreId,string? Id,string? Name);
+
+record StoreNameRequest(string? Name);
