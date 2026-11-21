@@ -93,7 +93,7 @@ jobs:
           }
           const fluidSource=fs.readFileSync('server/Inventory.Api/wwwroot/assets/login-fluid.js','utf8');
           for (const marker of ['id="loginAurora"', 'class="login-aurora"',
-              'src="/assets/login-fluid.js?v=3"', 'window.createLoginFluid',
+              'src="/assets/login-fluid.js?v=4"', 'window.createLoginFluid',
               'loginAurora.stop()', 'loginAurora.start()']) {
             if (!html.includes(marker)) throw new Error('Login fluid view/lifecycle missing: '+marker);
           }
@@ -107,6 +107,19 @@ jobs:
               !fluidSource.includes("inkBudget=Math.min(")) {
             throw new Error('Mouse movement must inject bounded fluid even without a pressed button');
           }
+          // Regression: the previous display shader nested main() and placed a uniform
+          // inside the function, which silently disabled all fluid rendering.
+          const displaySegment=fluidSource.split('    display: [')[1]?.split('    ]')[0];
+          if (!displaySegment) throw new Error('Fluid display shader missing');
+          if ((displaySegment.match(/'void main\(\)\{/g)||[]).length!==1 ||
+              !displaySegment.includes("'uniform vec2 sourceSize;'") ||
+              !displaySegment.includes("'vec3 smoothDye(vec2 p){'"))
+            throw new Error('Fluid display GLSL must have exactly one main and top-level uniforms');
+          if (!fluidSource.includes("root.addEventListener('pointermove',motion") ||
+              !fluidSource.includes("const dragging=") ||
+              !fluidSource.includes('ambientAt') ||
+              !fluidSource.includes('Math.min(1.6,inkBudget'))
+            throw new Error('Fluid motion missing pointer interaction or bounded ambient flow');
           if (fluidSource.includes('now-ambient') || fluidSource.includes('function seed()'))
             throw new Error('Background fluid must not inject dye continuously or seed moving clouds');
           if (!html.includes('#sidebarLogoutBtn,#mobileLogoutBtn') ||
