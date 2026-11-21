@@ -91,6 +91,10 @@ jobs:
           if (!html.includes('name===\'glacier\'?\'light\':\'dark\'')) {
             throw new Error('Glacier Light must switch the browser color scheme');
           }
+          for (const selector of ['.toolbar .search:hover:not(:disabled)', '.toolbar .search::placeholder',
+              'body[data-theme="glacier"] tbody tr:hover', '.inventory-responsive tbody tr:hover']) {
+            if (!html.includes(selector)) throw new Error('Missing themed search/row hover: '+selector);
+          }
           for (const endpoint of ['/api/auth/theme','/api/admin/theme/login']) {
             if (!fs.readFileSync('server/Inventory.Api/Program.cs','utf8').includes(endpoint))
               throw new Error('Theme API missing: '+endpoint);
