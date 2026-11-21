@@ -413,6 +413,30 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px color-mix(in srgb,v
 .theme-swatch i{display:block;width:17px;height:17px;border-radius:50%;border:1px solid #ffffff40}
 .theme-option:hover{border-color:var(--accent)}
 
+/* Use the chosen palette for desktop sidebar and mobile navigation hover states.
+   Explicit glacier override wins over older hardcoded light-mode selectors. */
+.nav button:hover:not(.active),
+body[data-theme="glacier"] .nav button:hover:not(.active),
+.mobile-nav button:hover:not(.active),
+body[data-theme="glacier"] .mobile-nav button:hover:not(.active){
+  background:color-mix(in srgb,var(--accent) 15%,var(--sidebar));
+  color:var(--text);
+  border-color:var(--active-border);
+}
+.nav button:focus-visible,
+.mobile-nav button:focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:2px;
+}
+.nav button.active:hover,
+body[data-theme="glacier"] .nav button.active:hover,
+.mobile-nav button.active:hover,
+body[data-theme="glacier"] .mobile-nav button.active:hover{
+  background:var(--active);
+  border-color:var(--active-border);
+  color:var(--text);
+}
+
 /* Theme-driven search fields and hovered inventory rows. Keep one source of color truth. */
 .toolbar .search{
   background:var(--input);
