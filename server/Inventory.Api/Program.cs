@@ -155,7 +155,9 @@ app.MapGet("/api/admin/employees",async (HttpContext ctx)=>{
 app.MapPost("/api/admin/employees",async (HttpContext ctx,EmployeeRequest req)=>{
     if((await Identity(ctx))?.admin!=true)return Results.Unauthorized();
     if(!Regex.IsMatch(req.Id??"",@"^[A-Za-z0-9_-]{2,24}$")||string.IsNullOrWhiteSpace(req.StoreId)||string.IsNullOrWhiteSpace(req.Name))return Results.BadRequest("Invalid employee details");
-    await using var c=await Connect();await using var cmd=new NpgsqlCommand("INSERT INTO employees(primary_store_id,id,name) VALUES(@store,@id,@name)",c);
+    await using var c=await Connect();
+    await using(var duplicate=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employees WHERE id=@id)",c)){duplicate.Parameters.AddWithValue("id",req.Id.Trim());if((bool)(await duplicate.ExecuteScalarAsync()??false))return Results.Conflict("Employee ID already exists. IDs must be unique across all stores.");}
+    await using var cmd=new NpgsqlCommand("INSERT INTO employees(store_id,primary_store_id,id,name) VALUES(@store,@store,@id,@name)",c);
     cmd.Parameters.AddWithValue("store",req.StoreId.Trim());cmd.Parameters.AddWithValue("id",req.Id.Trim());cmd.Parameters.AddWithValue("name",req.Name.Trim());
     await cmd.ExecuteNonQueryAsync();
     await using var access=new NpgsqlCommand("INSERT INTO employee_store_access(employee_id,store_id) VALUES(@employee,@store)",c);
