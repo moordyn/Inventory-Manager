@@ -405,6 +405,14 @@ function scannerLibrary(){
  if(!scannerLibraryPromise)scannerLibraryPromise=import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm').catch(err=>{scannerLibraryPromise=null;throw err});
  return scannerLibraryPromise;
 }
+// Safari lacks native BarcodeDetector on many devices. Prewarm ZXing during idle
+// so the first barcode scan can decode as soon as the camera preview starts.
+window.addEventListener('load',()=>{
+ if('BarcodeDetector' in window)return;
+ const warm=()=>scannerLibrary().catch(()=>{});
+ if('requestIdleCallback' in window)window.requestIdleCallback(warm,{timeout:3000});
+ else setTimeout(warm,1200);
+});
 function closeModal(){
  if(activeScannerStop)activeScannerStop();
  $('modalRoot').innerHTML='';
