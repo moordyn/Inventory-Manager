@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 ## Unreleased — next feature release
 
+- Added the Repair Queue module: multi-store FIFO repair tickets, device/repair details, employee and technician tracking, quotes and upfront/additional payment records, status timeline, multi-part barcode usage with atomic inventory checkout and retry protection, stock returns, mobile/desktop views, and integration tests.
+
 - Strengthened the existing theme-matched login and signed-in ambient animation brightness without changing their behavior, and coordinated login secondary buttons plus mobile Settings/Sign Out using theme palette variables.
 
 - Fixed mobile inventory, recent activity, checkout/product history, reorder, audit and bottom-navigation surfaces retaining hardcoded navy/green colors after changing themes. Mobile cards now inherit the active theme's raised surface color.
