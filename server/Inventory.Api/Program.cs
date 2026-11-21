@@ -14,8 +14,8 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = 429;
     options.AddPolicy("sensitive", context => RateLimitPartition.GetFixedWindowLimiter(
-        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-        _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(5), QueueLimit = 0 }));
+        (context.Connection.RemoteIpAddress?.ToString() ?? "unknown")+":"+context.Request.Path,
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 12, Window = TimeSpan.FromMinutes(5), QueueLimit = 0 }));
 });
 var app = builder.Build();
 app.UseRateLimiter();
