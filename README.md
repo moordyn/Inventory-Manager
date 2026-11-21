@@ -12,6 +12,7 @@ Self-hosted barcode inventory application for Windows browsers, mobile browsers,
 - Full store inventory CSV export (all active products, not just the current table), with formula-injection-safe text fields
 - Clickable low-stock dashboard metric with a reorder list, suggested order quantities and a reorder CSV export
 - In-place product-specific transaction history (latest 200 stock movements per product)
+- Editable **checkout notes after the transaction**, from either History or product history, with role checks, revision history and no stock change
 - Quick stock adjustment presets (+1, +5, −1, −5), still requiring Save and a reason for checkout
 - Administrator activity history (latest 200 actions): access grants/revocations, permissions, store changes, product deletion, email settings and global Gmail connection changes
 - One-time installation-token enrollment for a shared six-digit PIN
@@ -50,10 +51,11 @@ See [docs/ui-qa-checklist.md](docs/ui-qa-checklist.md) for the full mobile, desk
 - **Inventory → Export inventory CSV:** downloads all active products from the currently selected location, regardless of how many rows have loaded into the dashboard. Exports include SKU, product name, barcode, category, stock, minimum level, unit cost and description.
 - **Overview → Low stock alerts** (select the count), or **Inventory → Reorder list:** shows every product at or below its configured minimum. The **Order Qty** column gives the quantity necessary to bring stock **one unit above** the minimum. Export the list as CSV.
 - **Inventory → Edit → View history:** expands a per-product transaction list while leaving unsaved form fields intact. Shows up to the latest 200 movements with before/after quantities, employee, date, and reason.
+- **History → checkout → Edit note** (also in **Inventory → Edit → View history**): add details such as `Damaged during repair` to an existing checkout. The original employee or a store/global administrator can update a note, up to 1,000 characters. A new revision is recorded with the editor and timestamp; **View changes** shows previous and revised text. Stock quantity, checkout timestamp, and original employee do not change. Check-ins are not editable this way. Concurrent edits are rejected until the transaction is refreshed.
 - **Item stock dialog → +1/+5/−1/−5:** picks the action and quantity. Click **Save transaction** to commit it; checkout still requires a reason and prevents negative balances.
 - **Administration → Administrator activity history:** global admins see changes across stores; store admins see only changes associated with their current store. Historical actions from before this feature was deployed cannot be reconstructed.
 
-Reports are server-generated and store-scoped; the API never trusts a client-provided store ID for report access. The administrator event log excludes OAuth credentials and recipient address lists. Activity is recorded in the same database transaction as most administrative actions.
+Reports are server-generated and store-scoped; the API never trusts a client-provided store ID for report access. The administrator event log excludes OAuth credentials and recipient address lists. When an administrator edits a checkout note, a separate administrator audit event is recorded without copying the note text. Activity is recorded in the same database transaction as most administrative actions.
 
 ## Testing and release status
 
