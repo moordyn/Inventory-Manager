@@ -29,7 +29,7 @@ QA: check desktop mouse movement over the background, pointer movement over the 
 
 ## Animated signed-in background
 
-The main inventory application has its own **non-interactive, theme-matched ambient background**. Four oversized diffused light fields drift slowly behind the UI. Their colors come from each employee's selected theme (accent, active-border and muted colors), independent of the global login theme. Glacier Light renders them at lower intensity for white and pale surfaces.
+The main inventory application has its own **non-interactive, theme-matched ambient background**. Its larger, brighter overlapping color fields are deliberately visible around and subtly through the gently translucent cards/sidebar; panel blur keeps labels and controls readable. Four oversized diffused light fields drift slowly behind the UI. Their colors come from each employee's selected theme (accent, active-border and muted colors), independent of the global login theme. Glacier Light renders them at lower intensity for white and pale surfaces.
 
 This canvas is fixed to the viewport, so scrolling through inventory and transaction history does not create a giant graphics buffer. It renders at no more than **20 frames per second**, caps device pixel ratio to **1.25**, and stays behind the sidebar, forms, cards, tables, and navigation. The background does not handle pointer input; only the separate sign-in aurora responds to user movement.
 
