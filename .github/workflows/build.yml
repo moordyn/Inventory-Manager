@@ -74,6 +74,22 @@ jobs:
           if (!favicon.includes('<svg') || !favicon.includes('viewBox="0 0 64 64"')) {
             throw new Error('ZAGG favicon SVG is missing or malformed');
           }
+          // Five coordinated theme palettes and matching branded SVGs must ship together.
+          const palettes = ['mint','purple','ocean','ember','rose'];
+          for (const theme of palettes) {
+            for (const asset of ['zagg-wordmark-','zagg-favicon-']) {
+              const svg = fs.readFileSync(assetBase + asset + theme + '.svg','utf8');
+              if (!svg.includes('<svg') || !svg.includes('viewBox=')) throw new Error('Invalid theme branding: '+asset+theme);
+            }
+          }
+          for (const marker of ['id="myThemeChoices"','id="loginThemeChoices"',
+              'data-theme-choice=', 'function setTheme(theme)', 'themeMarkup(active)']) {
+            if (!html.includes(marker)) throw new Error('Theme selector missing: '+marker);
+          }
+          for (const endpoint of ['/api/auth/theme','/api/admin/theme/login']) {
+            if (!fs.readFileSync('server/Inventory.Api/Program.cs','utf8').includes(endpoint))
+              throw new Error('Theme API missing: '+endpoint);
+          }
           for (const brandLocation of ['brand-wordmark-login', 'brand-wordmark-sidebar', 'brand-wordmark-mobile']) {
             if (!html.includes(brandLocation + '" src="/assets/zagg-wordmark.svg"')) {
               throw new Error('ZAGG logo missing from ' + brandLocation);
