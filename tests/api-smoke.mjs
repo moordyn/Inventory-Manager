@@ -365,6 +365,13 @@ assert.equal((await call('repairs?history=true',{token:admin})).body.length,2);
 await call('auth/select-store',{token:admin,method:'POST',body:{storeId:'BRANCH2'},expect:200});
 assert.equal((await call('repairs',{token:admin})).body.length,0);
 await call('repairs/'+createdRepair,{token:admin,expect:404});
+await call('repairs/'+createdRepair+'/parts',{token:admin,method:'POST',body:{
+ itemId:id,quantity:1,idempotencyKey:partKey1
+},expect:404});
+await call('repairs/'+createdRepair+'/payments',{token:admin,method:'POST',body:{
+ amount:40,idempotencyKey:paymentKey
+},expect:404});
+await call('repairs',{token:admin,method:'POST',body:repairBody,expect:404});
 await call('repairs/'+createdRepair+'/status',{token:admin,method:'PUT',body:{status:'checked_in'},expect:404});
 await call('auth/select-store',{token:admin,method:'POST',body:{storeId:'DEFAULT'},expect:200});
 
@@ -373,12 +380,19 @@ audit=(await call('admin/audit',{token:admin})).body;
 assert.ok(audit.some(x=>x.action==='product.deleted'&&x.target===id));
 assert.ok(!(await call('items/export',{token:admin})).body.includes('Test charging kit'));
 // OWNER may rename their own account without losing global privileges or creating a new bootstrap.
+const ownerRenamedRepair=(await call('repairs',{token:admin,method:'POST',body:{
+ device:'Repair employee ID migration check',repairType:'Service',quotedTotal:0,
+ paidUpfront:0,assignedTo:'OWNER',idempotencyKey:randomUUID()
+},expect:201})).body.id;
 await call('admin/employees/OWNER/id',{token:admin,method:'PUT',body:{newId:'PRIMARYADMIN'},expect:200});
 await call('auth/me',{token:admin,expect:401});
 assert.equal((await call('auth/status')).body.initialized,true);
 await call('auth/employee-login',{method:'POST',body:{employeeId:'OWNER',password:ownerPassword},expect:401});
 const newOwner=(await call('auth/employee-login',{method:'POST',body:{employeeId:'PRIMARYADMIN',password:ownerPassword},expect:200})).body.token;
 assert.equal((await call('auth/me',{token:newOwner})).body.isGlobalAdmin,true);
+const renamedRepairDetail=(await call('repairs/'+ownerRenamedRepair,{token:newOwner})).body;
+assert.equal(renamedRepairDetail.ticket.createdBy,'PRIMARYADMIN','Repair authors must follow employee-ID migration');
+assert.equal(renamedRepairDetail.ticket.assignedTo,'PRIMARYADMIN','Technician references must follow employee-ID migration');
 await call('admin/employees/PRIMARYADMIN/permissions',{token:newOwner,method:'PUT',body:{globalAdmin:false,storeAdminIds:[]},expect:400});
 assert.ok((await call('admin/employees',{token:newOwner})).body.some(e=>e.id==='PRIMARYADMIN'));
 console.log('API smoke tests passed: five themes, login palette authorization, persistence, password login, first-time email verification, one-use tokens, password reset/session revocation, CSV, checkout notes, store permissions and audit.');
