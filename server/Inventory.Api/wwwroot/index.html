@@ -475,6 +475,24 @@ body[data-theme="glacier"] .login-screen>.login-card{background:color-mix(in srg
 @media(prefers-reduced-motion:reduce){.login-aurora{display:none}.login-screen::before{filter:none}}
 
 
+/* Theme-matched sign-out buttons instead of fixed brown warning colors. */
+#sidebarLogoutBtn,#mobileLogoutBtn,
+body[data-theme="glacier"] #sidebarLogoutBtn,body[data-theme="glacier"] #mobileLogoutBtn{
+  background:color-mix(in srgb,var(--accent) 13%,var(--raised));
+  color:var(--text);
+  border:1px solid var(--active-border);
+}
+#sidebarLogoutBtn:hover:not(:disabled),#mobileLogoutBtn:hover:not(:disabled),
+body[data-theme="glacier"] #sidebarLogoutBtn:hover:not(:disabled),
+body[data-theme="glacier"] #mobileLogoutBtn:hover:not(:disabled){
+  background:color-mix(in srgb,var(--accent) 25%,var(--raised));
+  color:var(--text);
+  border-color:var(--accent);
+}
+#sidebarLogoutBtn:focus-visible,#mobileLogoutBtn:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;
+}
+
 /* Signed-in ambient background. Fixed viewport layer stays behind app UI and never accepts input. */
 #app.shell{position:relative;isolation:isolate;background:transparent}
 #app .app-aurora{position:fixed;inset:0;width:100vw;height:100dvh;z-index:0;pointer-events:none;opacity:1}
@@ -666,7 +684,7 @@ body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srg
 </form><p class="muted" style="margin-top:12px">You are signed out after 15 minutes without activity. No countdown is displayed.</p></section><section class="card" style="margin-top:18px"><h2>Server settings</h2><p class="muted" style="margin:12px 0">All inventory is stored centrally on this server. An internet connection is required.</p><p>Server: <strong id="serverHost"></strong></p><p style="margin-top:16px"><button class="btn" id="refreshBtn">↻ Refresh data</button> <button class="btn warn" id="logoutBtn">Sign out</button></p><p class="muted" style="margin-top:16px">Employee access uses individual passwords. Automatic sign-out occurs after 15 minutes of inactivity. Database backups are managed by the server.</p></section></div>
 </main><nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation"><button data-page="overview" class="active"><span>▦</span>Home</button><button data-page="inventory"><span>▤</span>Items</button><button data-page="checkin"><span>↙</span>In</button><button data-page="checkout"><span>↗</span>Out</button><button data-page="history"><span>◷</span>History</button><button data-page="administration" id="mobileAdminNav" class="hidden"><span>♙</span>Admin</button></nav></div>
 <div id="modalRoot"></div><div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
-<script src="/assets/login-fluid.js"></script>
+<script src="/assets/login-fluid.js?v=2"></script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
