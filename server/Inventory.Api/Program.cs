@@ -547,6 +547,7 @@ await using (var c=await Connect())
     ALTER TABLE items ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT' REFERENCES stores(id);
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'DEFAULT' REFERENCES stores(id);
     ALTER TABLE movements ADD COLUMN IF NOT EXISTS employee_id text NOT NULL DEFAULT 'LEGACY';
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
     ALTER TABLE items DROP CONSTRAINT IF EXISTS items_sku_key;
     DROP INDEX IF EXISTS items_store_sku_idx;
     CREATE UNIQUE INDEX IF NOT EXISTS items_store_sku_idx ON items(store_id,sku) WHERE deleted_at IS NULL;
@@ -556,7 +557,6 @@ await using (var c=await Connect())
     ALTER TABLE items ADD COLUMN IF NOT EXISTS min_stock integer NOT NULL DEFAULT 0;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS unit_cost numeric(12,2);
     ALTER TABLE items ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
-    ALTER TABLE items ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS deleted_by text;
     DROP INDEX IF EXISTS items_barcode_idx;
     DROP INDEX IF EXISTS items_store_barcode_idx;
