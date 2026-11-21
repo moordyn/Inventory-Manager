@@ -1,0 +1,31 @@
+name: Inventory Manager CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build backend
+        run: dotnet build server/Inventory.Api/Inventory.Api.csproj --configuration Release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify frontend JavaScript
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const html = fs.readFileSync('server/Inventory.Api/wwwroot/index.html','utf8');
+          const script = html.match(/<script>([\s\S]*?)<\/script>/);
+          if (!script) throw new Error('Inline application script not found');
+          new Function(script[1]);
+          const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]));
+          const missing = [...html.matchAll(/\$\('([^']+)'\)/g)].map(m=>m[1]).filter(id=>!ids.has(id));
+          if (missing.length) throw new Error('Missing element IDs: '+[...new Set(missing)].join(', '));
+          console.log('Frontend syntax and DOM reference checks passed');
+          NODE
