@@ -9,7 +9,7 @@ const usd=v=>money(Number(v||0));
 const key=()=>crypto.randomUUID();
 const closed=t=>t.status==='completed'||t.status==='cancelled';
 const canPickup=t=>!t.pickedUpAt&&(t.status==='completed'||t.status==='ready');
-const displayStatus=t=>t.pickedUpAt?'Paid / Picked Up':canPickup(t)?'Completed · Awaiting Pickup':status(t.status);
+const displayStatus=t=>t.pickedUpAt?'Paid / Picked Up':t.status==='completed'?'Completed · Awaiting Pickup':status(t.status);
 const status=v=>STATUS[v]||v;
 function reset(){
  version++;overviewVersion++;rows=[];historical=false;cameraTicketId=null;loading=false;
