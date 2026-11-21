@@ -142,9 +142,10 @@ app.MapPost("/api/auth/select-store",async (HttpContext ctx,SelectStore req)=>{
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
     
     await using var c=await Connect();
-    await using(var check=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employee_store_access a JOIN stores s ON s.id=a.store_id WHERE a.employee_id=@employee AND a.store_id=@store AND s.active)",c)){
+    await using(var check=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM employee_store_access a JOIN stores s ON s.id=a.store_id WHERE (a.employee_id=@employee AND a.store_id=@store AND s.active))",c)){
         check.Parameters.AddWithValue("employee",who.Value.employee);check.Parameters.AddWithValue("store",req.StoreId??"");
-        if(!(bool)(await check.ExecuteScalarAsync()??false))return Results.Forbid();
+        if(!who.Value.globalAdmin && !(bool)(await check.ExecuteScalarAsync()??false))return Results.Forbid();
+        if(who.Value.globalAdmin){await using var exists=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM stores WHERE id=@store AND active)",c);exists.Parameters.AddWithValue("store",req.StoreId??"");if(!(bool)(await exists.ExecuteScalarAsync()??false))return Results.Forbid();}
     }
     var auth=ctx.Request.Headers.Authorization.ToString()[7..].Trim();
     await using var cmd=new NpgsqlCommand("UPDATE sessions SET store_id=@store WHERE token_hash=@hash AND employee_id=@employee AND expires_at>now()",c);
