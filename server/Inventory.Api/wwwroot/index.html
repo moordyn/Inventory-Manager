@@ -456,6 +456,7 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
  <div class="admin-head"><div><h2>Team & permissions</h2><p>Manage employees, store access and administrator roles</p></div></div>
  <div id="employeesList"></div>
  <form id="permissionsForm" class="hidden"><div class="admin-head"><h3 id="permissionsTitle">Edit permissions</h3><button class="btn ghost" type="button" id="closePermissionsBtn">Close</button></div>
+  <div id="employeeIdEditWrap" class="hidden"><label for="employeeIdEdit">Employee ID — global admins only</label><input id="employeeIdEdit" maxlength="24" pattern="[A-Za-z0-9_-]{2,24}"><button type="button" class="btn" id="saveEmployeeIdBtn" style="margin-top:8px">Change employee ID</button><p class="muted">Renaming signs the employee out on all devices. OWNER is protected.</p></div>
   <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="globalAdminToggle" style="width:auto"> Global Administrator · all locations</label>
   <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="storeAdminToggle" style="width:auto"> Store Administrator · selected locations</label>
   <div id="adminLocations"></div>
@@ -474,7 +475,15 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
  <div class="section-head"><div><h2>Administrator activity history</h2><p>Recent changes to access, permissions, stores, products, email, and alerts</p></div><button class="btn" id="refreshAuditBtn" type="button">↻ Refresh activity</button></div>
  <div id="adminAuditList" aria-live="polite"><div class="empty">Loading administrator actions…</div></div>
 </section>
-</div><div class="view" id="view-settings"><section class="card"><h2>Account security</h2><p id="accountEmailStatus" class="muted">Checking your email verification…</p><button class="btn" type="button" id="sendMyVerificationBtn">Email verification link</button><p class="muted" style="margin-top:12px">You are signed out after 15 minutes without activity. No countdown is displayed.</p></section><section class="card" style="margin-top:18px"><h2>Server settings</h2><p class="muted" style="margin:12px 0">All inventory is stored centrally on this server. An internet connection is required.</p><p>Server: <strong id="serverHost"></strong></p><p style="margin-top:16px"><button class="btn" id="refreshBtn">↻ Refresh data</button> <button class="btn warn" id="logoutBtn">Sign out</button></p><p class="muted" style="margin-top:16px">Employee access uses individual passwords. Automatic sign-out occurs after 15 minutes of inactivity. Database backups are managed by the server.</p></section></div>
+</div><div class="view" id="view-settings"><section class="card"><h2>Account security</h2><p id="accountEmailStatus" class="muted">Checking your email verification…</p><button class="btn" type="button" id="sendMyVerificationBtn">Email verification link</button>
+<form id="changeEmailForm" style="margin-top:18px;max-width:520px">
+ <h3>Change your email address</h3>
+ <p class="muted">Your employee ID is fixed. The new email takes effect only after verification.</p>
+ <label for="changeEmailNew">New email</label><input type="email" id="changeEmailNew" required autocomplete="email">
+ <label for="changeEmailConfirm">Confirm new email</label><input type="email" id="changeEmailConfirm" required autocomplete="off">
+ <label for="changeEmailPassword">Current password</label><input type="password" id="changeEmailPassword" required autocomplete="current-password">
+ <button type="submit" class="btn primary" style="margin-top:14px">Send confirmation link</button>
+</form><p class="muted" style="margin-top:12px">You are signed out after 15 minutes without activity. No countdown is displayed.</p></section><section class="card" style="margin-top:18px"><h2>Server settings</h2><p class="muted" style="margin:12px 0">All inventory is stored centrally on this server. An internet connection is required.</p><p>Server: <strong id="serverHost"></strong></p><p style="margin-top:16px"><button class="btn" id="refreshBtn">↻ Refresh data</button> <button class="btn warn" id="logoutBtn">Sign out</button></p><p class="muted" style="margin-top:16px">Employee access uses individual passwords. Automatic sign-out occurs after 15 minutes of inactivity. Database backups are managed by the server.</p></section></div>
 </main><nav class="mobile-nav" id="mobileNav" aria-label="Mobile navigation"><button data-page="overview" class="active"><span>▦</span>Home</button><button data-page="inventory"><span>▤</span>Items</button><button data-page="checkin"><span>↙</span>In</button><button data-page="checkout"><span>↗</span>Out</button><button data-page="history"><span>◷</span>History</button><button data-page="administration" id="mobileAdminNav" class="hidden"><span>♙</span>Admin</button></nav></div>
 <div id="modalRoot"></div><div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 <script>
@@ -552,7 +561,7 @@ async function loadAuthEmailToken(raw){
  try{
   const info=await api('auth/token-info','POST',{token:raw});
   authLinkPurpose=info.purpose;
-  $('authTokenTitle').textContent=info.purpose==='reset'?'Reset your password':info.purpose==='verify'?'Verify your email':'Activate your employee account';
+  $('authTokenTitle').textContent=info.purpose==='reset'?'Reset your password':info.purpose==='verify'?'Verify your email':info.purpose==='change_email'?'Confirm your new email':'Activate your employee account';
   $('authTokenHint').textContent='Employee ID: '+info.employeeId+'. '+(info.purpose==='reset'?'Enter and confirm a new password.':'Select the button below to confirm ownership of this email address.');
   $('resetPasswordFields').classList.toggle('hidden',info.purpose!=='reset');
   $('resetPassword').required=info.purpose==='reset';
@@ -639,6 +648,17 @@ $('authTokenForm').onsubmit=async e=>{
   authLinkToken='';$('authTokenForm').reset();authScreen('employeeLogin');
   $('authMsg').textContent=result.message||'Your account is ready. Sign in with your password.';
  }catch(err){$('authMsg').textContent=err.message;}
+};
+$('changeEmailForm').onsubmit=async e=>{
+ e.preventDefault();
+ const email=$('changeEmailNew').value.trim(),confirmEmail=$('changeEmailConfirm').value.trim();
+ if(email.toLowerCase()!==confirmEmail.toLowerCase()){toast('Email confirmation does not match.',true);return;}
+ const button=$('changeEmailForm').querySelector('button[type="submit"]');button.disabled=true;
+ try{
+  const result=await api('auth/change-email','POST',{email,confirmEmail,password:$('changeEmailPassword').value});
+  $('changeEmailForm').reset();toast(result.message);
+ }catch(err){toast('Unable to change email: '+err.message,true)}
+ finally{button.disabled=false}
 };
 $('sendMyVerificationBtn').onclick=async()=>{
  const button=$('sendMyVerificationBtn');button.disabled=true;
@@ -1208,7 +1228,7 @@ $('sendTestAlert').onclick=async ()=>{
 const auditActionNames={
  'store.created':'Store created','store.updated':'Store updated','employee.created':'Employee created',
  'access.granted':'Store access granted','access.revoked':'Store access removed',
- 'employee.permissions':'Permissions updated','alerts.updated':'Email alerts updated',
+ 'employee.permissions':'Permissions updated','employee.id_changed':'Employee ID changed','account.email_changed':'Account email changed','alerts.updated':'Email alerts updated',
  'product.deleted':'Product deleted','movement.note_updated':'Checkout note updated','oauth.configured':'Google OAuth configuration updated',
  'gmail.connected':'Global Gmail connected','gmail.disconnected':'Global Gmail disconnected'
 };
@@ -1262,12 +1282,27 @@ function showEmployeePermissions(id){
  $('permissionsTitle').textContent='Permissions: '+employee.name+' ('+id+')';
  $('globalAdminToggle').checked=employee.globalAdmin;
  $('globalAdminToggle').disabled=id==='OWNER';
+ $('employeeIdEditWrap').classList.toggle('hidden',!identity?.isGlobalAdmin||id==='OWNER');
+ $('employeeIdEdit').value=id;
  const selected=adminAccess.filter(x=>x.employeeId===id&&x.role==='store_admin').map(x=>x.storeId);
  $('storeAdminToggle').checked=selected.length>0;
  $('adminLocations').innerHTML=adminStores.map(x=>'<label style="display:flex;align-items:center;gap:10px"><input type="checkbox" class="admin-store-checkbox" value="'+esc(x.id)+'" style="width:auto" '+(selected.includes(x.id)?'checked':'')+'> '+esc(x.name)+'</label>').join('');
  $('adminLocations').classList.toggle('hidden',!$('storeAdminToggle').checked);
 }
 $('employeesList').onclick=e=>{const b=e.target.closest('[data-permission-employee]');if(b){showEmployeePermissions(b.dataset.permissionEmployee);$('permissionsForm').scrollIntoView({behavior:'smooth',block:'nearest'})}};
+$('saveEmployeeIdBtn').onclick=async()=>{
+ if(!identity?.isGlobalAdmin||!selectedPermissionEmployee||selectedPermissionEmployee==='OWNER')return;
+ const previous=selectedPermissionEmployee,newId=$('employeeIdEdit').value.trim();
+ if(previous===newId)return;
+ if(!/^[A-Za-z0-9_-]{2,24}$/.test(newId)){toast('Invalid employee ID.',true);return;}
+ if(!confirm('Change employee ID '+previous+' to '+newId+'? All their active sessions will be revoked.'))return;
+ try{
+  await api('admin/employees/'+encodeURIComponent(previous)+'/id','PUT',{newId});
+  selectedPermissionEmployee=newId;
+  toast('Employee ID updated');await loadAdmin();
+  if(identity.employeeId===previous)logout();
+ }catch(err){toast('Employee ID change failed: '+err.message,true)}
+};
 $('closePermissionsBtn').onclick=()=>{$('permissionsForm').classList.add('hidden');selectedPermissionEmployee=null};
 $('storeAdminToggle').onchange=e=>$('adminLocations').classList.toggle('hidden',!e.target.checked);
 $('permissionsForm').onsubmit=async e=>{
