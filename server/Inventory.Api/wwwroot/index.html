@@ -456,7 +456,7 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
  <div class="admin-head"><div><h2>Team & permissions</h2><p>Manage employees, store access and administrator roles</p></div></div>
  <div id="employeesList"></div>
  <form id="permissionsForm" class="hidden"><div class="admin-head"><h3 id="permissionsTitle">Edit permissions</h3><button class="btn ghost" type="button" id="closePermissionsBtn">Close</button></div>
-  <div id="employeeIdEditWrap" class="hidden"><label for="employeeIdEdit">Employee ID — global admins only</label><input id="employeeIdEdit" maxlength="24" pattern="[A-Za-z0-9_-]{2,24}"><button type="button" class="btn" id="saveEmployeeIdBtn" style="margin-top:8px">Change employee ID</button><p class="muted">Renaming signs the employee out on all devices. OWNER is protected.</p></div>
+  <div id="employeeIdEditWrap" class="hidden"><label for="employeeIdEdit">Employee ID — global admins only</label><input id="employeeIdEdit" maxlength="24" pattern="[A-Za-z0-9_-]{2,24}"><button type="button" class="btn" id="saveEmployeeIdBtn" style="margin-top:8px">Change employee ID</button><p class="muted">Only global admins can rename IDs, including their own. Renaming signs the account out on all devices.</p></div>
   <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="globalAdminToggle" style="width:auto"> Global Administrator · all locations</label>
   <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="storeAdminToggle" style="width:auto"> Store Administrator · selected locations</label>
   <div id="adminLocations"></div>
@@ -1281,8 +1281,8 @@ function showEmployeePermissions(id){
  $('permissionsForm').classList.remove('hidden');
  $('permissionsTitle').textContent='Permissions: '+employee.name+' ('+id+')';
  $('globalAdminToggle').checked=employee.globalAdmin;
- $('globalAdminToggle').disabled=id==='OWNER';
- $('employeeIdEditWrap').classList.toggle('hidden',!identity?.isGlobalAdmin||id==='OWNER');
+ $('globalAdminToggle').disabled=false;
+ $('employeeIdEditWrap').classList.toggle('hidden',!identity?.isGlobalAdmin);
  $('employeeIdEdit').value=id;
  const selected=adminAccess.filter(x=>x.employeeId===id&&x.role==='store_admin').map(x=>x.storeId);
  $('storeAdminToggle').checked=selected.length>0;
@@ -1291,7 +1291,7 @@ function showEmployeePermissions(id){
 }
 $('employeesList').onclick=e=>{const b=e.target.closest('[data-permission-employee]');if(b){showEmployeePermissions(b.dataset.permissionEmployee);$('permissionsForm').scrollIntoView({behavior:'smooth',block:'nearest'})}};
 $('saveEmployeeIdBtn').onclick=async()=>{
- if(!identity?.isGlobalAdmin||!selectedPermissionEmployee||selectedPermissionEmployee==='OWNER')return;
+ if(!identity?.isGlobalAdmin||!selectedPermissionEmployee)return;
  const previous=selectedPermissionEmployee,newId=$('employeeIdEdit').value.trim();
  if(previous===newId)return;
  if(!/^[A-Za-z0-9_-]{2,24}$/.test(newId)){toast('Invalid employee ID.',true);return;}
