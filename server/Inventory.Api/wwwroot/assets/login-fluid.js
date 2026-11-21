@@ -112,23 +112,30 @@
     display: [
       'uniform sampler2D dye;',
       'uniform float lightMode;',
+      'uniform vec2 sourceSize;',
+      'vec3 smoothDye(vec2 p){',
+      ' vec2 coord=clamp(p,vec2(0.0),vec2(1.0))*sourceSize-.5;',
+      ' ivec2 lo=ivec2(floor(coord));vec2 f=fract(coord);',
+      ' ivec2 edge=ivec2(sourceSize)-1;',
+      ' vec3 a=texelFetch(dye,clamp(lo,ivec2(0),edge),0).rgb;',
+      ' vec3 b=texelFetch(dye,clamp(lo+ivec2(1,0),ivec2(0),edge),0).rgb;',
+      ' vec3 c=texelFetch(dye,clamp(lo+ivec2(0,1),ivec2(0),edge),0).rgb;',
+      ' vec3 d=texelFetch(dye,clamp(lo+ivec2(1,1),ivec2(0),edge),0).rgb;',
+      ' return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);',
+      '}',
       'void main(){',
-      ' uniform vec2 sourceSize;',
-      ' vec4 smoothDye(vec2 p){',
-      '   vec2 coord=p*sourceSize-.5;',
-      '   ivec2 lo=ivec2(floor(coord));vec2 f=fract(coord);',
-      '   ivec2 edge=ivec2(sourceSize)-1;',
-      '   vec3 a=texelFetch(dye,clamp(lo,ivec2(0),edge),0).rgb;',
-      '   vec3 b=texelFetch(dye,clamp(lo+ivec2(1,0),ivec2(0),edge),0).rgb;',
-      '   vec3 c=texelFetch(dye,clamp(lo+ivec2(0,1),ivec2(0),edge),0).rgb;',
-      '   vec3 d=texelFetch(dye,clamp(lo+ivec2(1,1),ivec2(0),edge),0).rgb;',
-      '   return vec4(mix(mix(a,b,f.x),mix(c,d,f.x),f.y),1.0);',
-      ' }',
-      'void main(){',
-      ' vec3 ink=max(smoothDye(uv).rgb,vec3(0));',
+      ' vec3 ink=max(smoothDye(uv),vec3(0));',
       ' float energy=max(ink.r,max(ink.g,ink.b));',
-      ' float alpha=clamp((1.0-exp(-energy*1.7))*(lightMode>.5?.46:.68),0.0,.72);',
-      ' vec3 color=clamp(ink/(energy+.08),vec3(0),vec3(1));',
+      ' vec2 pixel=1.0/sourceSize;',
+      ' float left=length(smoothDye(uv-vec2(pixel.x,0.0)));',
+      ' float right=length(smoothDye(uv+vec2(pixel.x,0.0)));',
+      ' float below=length(smoothDye(uv-vec2(0.0,pixel.y)));',
+      ' float above=length(smoothDye(uv+vec2(0.0,pixel.y)));',
+      ' vec3 normal=normalize(vec3(right-left,above-below,0.42));',
+      ' float lighting=clamp(dot(normal,normalize(vec3(-0.3,0.42,0.85))),0.55,1.35);',
+      ' float alpha=clamp((1.0-exp(-energy*2.8))*(lightMode>.5?.68:.94),0.0,.91);',
+      ' vec3 color=clamp(ink/(energy+.035),vec3(0),vec3(1));',
+      ' color=clamp(color*lighting*1.15,vec3(0),vec3(1));',
       ' frag=vec4(color,alpha);',
       '}'
     ]
@@ -145,7 +152,7 @@
   function create(canvas,root) {
     const reduce=window.matchMedia('(prefers-reduced-motion: reduce)');
     const gl=canvas.getContext('webgl2',{alpha:true,premultipliedAlpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:false,powerPreference:'low-power'});
-    let ready=false,active=false,raf=0,last=0,width=0,height=0,simW=0,simH=0,dyeW=0,dyeH=0,colors=[],pointer=null,queue=[],step=0,inkBudget=1.05,lastBudget=0,lastSample=0;
+    let ready=false,active=false,raf=0,last=0,width=0,height=0,simW=0,simH=0,dyeW=0,dyeH=0,colors=[],pointer=null,queue=[],step=0,inkBudget=1.6,lastBudget=0,lastSample=0,ambientAt=0;
     let targets=null,programs=null;
     function theme(){
       const css=getComputedStyle(document.body);
@@ -299,9 +306,9 @@
         ? (event.buttons&1)!==0 : true;
       // Continuous, bounded budget refills even during a single long drag.
       if(!lastBudget)lastBudget=now;
-      inkBudget=Math.min(1.05,inkBudget+(now-lastBudget)*.00042);
+      inkBudget=Math.min(1.6,inkBudget+(now-lastBudget)*.00075);
       lastBudget=now;
-      const desired=Math.min(dragging ? .26 : .18,dist/(dragging ? 290 : 460));
+      const desired=Math.min(dragging ? .35 : .25,dist/(dragging ? 240 : 350));
       const amount=Math.min(desired,inkBudget);
       if(amount<.008)return;
       inkBudget-=amount;
@@ -310,8 +317,8 @@
         x:next.x,y:next.y,
         vx:Math.max(-.9,Math.min(.9,dx*velocity)),
         vy:Math.max(-.9,Math.min(.9,dy*velocity)),
-        color:colors[step%colors.length].map(v=>v*amount*(dragging ? 2.3 : 2.0)),
-        radius:dragging ? .040 : .031
+        color:colors[step%colors.length].map(v=>v*amount*(dragging ? 3.7 : 3.2)),
+        radius:dragging ? .035 : .029
       });
       if(queue.length>12)queue.shift();
     }
@@ -343,12 +350,19 @@
         const q=queue.shift();
         splat(q.x,q.y,q.vx,q.vy,q.color,q.radius);
       }
-      // No periodic dye injection: the fluid settles instead of taking over the page.
+      // Reference-inspired restrained ambient trails, rather than constant flooding.
+      if(now-ambientAt>2600){
+        ambientAt=now;
+        const t=now*.00022;
+        splat(.5+Math.sin(t*1.13)*.32,.5+Math.cos(t*.83)*.29,
+          Math.cos(t)*.06,Math.sin(t)*.07,
+          colors[Math.floor(t*1.7)%colors.length].map(v=>v*.052),.035);
+      }
       pass('curl',targets.curl,{velocity:vel.a},{stepSize:texel});
       pass('vorticity',vel.b,{velocity:vel.a,curlField:targets.curl},{stepSize:texel,dt});
       vel.swap();
       pass('divergence',targets.divergence,{velocity:vel.a},{stepSize:texel});
-      for(let i=0;i<11;i++){
+      for(let i=0;i<18;i++){
         pass('pressure',pressure.b,{pressureField:pressure.a,divergenceField:targets.divergence},{stepSize:texel});
         pressure.swap();
       }
@@ -357,7 +371,7 @@
       pass('display',null,{dye:dye.a},{sourceSize:[dyeW,dyeH],lightMode:document.body.dataset.theme==='glacier'?1:0});
     }
     function stop(){
-      active=false;cancelAnimationFrame(raf);raf=0;last=0;pointer=null;queue=[];inkBudget=1.05;lastBudget=0;lastSample=0;
+      active=false;cancelAnimationFrame(raf);raf=0;last=0;pointer=null;queue=[];inkBudget=1.6;lastBudget=0;lastSample=0;
     }
     function start(){
       stop();theme();
