@@ -610,38 +610,6 @@ app.MapPost("/api/items/{id:guid}/delete",async (HttpContext ctx,Guid id,DeleteI
     return Results.Ok(new{deleted=true});
 });
 // Delivery loop runs on the API host; inventory operations never depend on Gmail availability.
-var mailCts=new CancellationTokenSource();
-app.Lifetime.ApplicationStopping.Register(()=>mailCts.Cancel());
-_ = Task.Run(async ()=>{
-    while(!mailCts.IsCancellationRequested){
-        try{
-            if(MailConfigured()||GoogleReady()){
-                await using var c=await Connect();
-                await using var cmd=new NpgsqlCommand("""
-                SELECT o.id,o.store_id,o.subject,o.body,a.recipients,(g.store_id IS NOT NULL)
-                FROM alert_outbox o JOIN store_alert_settings a ON a.store_id=o.store_id LEFT JOIN google_store_accounts g ON g.store_id=o.store_id
-                WHERE o.sent_at IS NULL AND o.next_attempt<=now() AND a.enabled AND a.recipients<>'' AND (g.store_id IS NOT NULL OR @smtp)
-                ORDER BY o.id LIMIT 20
-                """,c);
-                cmd.Parameters.AddWithValue("smtp",MailConfigured());
-                var pending=new List<(long id,string store,string subject,string body,string recipients,bool google)>();
-                await using(var r=await cmd.ExecuteReaderAsync()){while(await r.ReadAsync())pending.Add((r.GetInt64(0),r.GetString(1),r.GetString(2),r.GetString(3),r.GetString(4),r.GetBoolean(5)));}
-                foreach(var job in pending){
-                    try{
-                        if(job.google)await SendGmail(job.store,ParseRecipients(job.recipients),job.subject,job.body);else await SendMail(ParseRecipients(job.recipients),job.subject,job.body);
-                        await using var done=new NpgsqlCommand("UPDATE alert_outbox SET sent_at=now() WHERE id=@id AND sent_at IS NULL",c);
-                        done.Parameters.AddWithValue("id",job.id);await done.ExecuteNonQueryAsync();
-                    }catch(Exception ex){
-                        app.Logger.LogWarning(ex,"Low-stock email delivery failed for store {Store}",job.store);
-                        await using var retry=new NpgsqlCommand("UPDATE alert_outbox SET attempts=attempts+1,next_attempt=now()+interval '5 minutes' * LEAST(attempts+1,12) WHERE id=@id",c);
-                        retry.Parameters.AddWithValue("id",job.id);await retry.ExecuteNonQueryAsync();
-                    }
-                }
-            }
-        }catch(Exception ex){app.Logger.LogError(ex,"Low-stock mail worker error");}
-        try{await Task.Delay(TimeSpan.FromSeconds(30),mailCts.Token);}catch(OperationCanceledException){break;}
-    }
-});
 await using (var c=await Connect())
 {
     await using var cmd=new NpgsqlCommand("""
@@ -691,6 +659,39 @@ await using (var c=await Connect())
     """,c);
     await cmd.ExecuteNonQueryAsync();
 }
+var mailCts=new CancellationTokenSource();
+app.Lifetime.ApplicationStopping.Register(()=>mailCts.Cancel());
+_ = Task.Run(async ()=>{
+    while(!mailCts.IsCancellationRequested){
+        try{
+            if(MailConfigured()||GoogleReady()){
+                await using var c=await Connect();
+                await using var cmd=new NpgsqlCommand("""
+                SELECT o.id,o.store_id,o.subject,o.body,a.recipients,(g.store_id IS NOT NULL)
+                FROM alert_outbox o JOIN store_alert_settings a ON a.store_id=o.store_id LEFT JOIN google_store_accounts g ON g.store_id=o.store_id
+                WHERE o.sent_at IS NULL AND o.next_attempt<=now() AND a.enabled AND a.recipients<>'' AND (g.store_id IS NOT NULL OR @smtp)
+                ORDER BY o.id LIMIT 20
+                """,c);
+                cmd.Parameters.AddWithValue("smtp",MailConfigured());
+                var pending=new List<(long id,string store,string subject,string body,string recipients,bool google)>();
+                await using(var r=await cmd.ExecuteReaderAsync()){while(await r.ReadAsync())pending.Add((r.GetInt64(0),r.GetString(1),r.GetString(2),r.GetString(3),r.GetString(4),r.GetBoolean(5)));}
+                foreach(var job in pending){
+                    try{
+                        if(job.google)await SendGmail(job.store,ParseRecipients(job.recipients),job.subject,job.body);else await SendMail(ParseRecipients(job.recipients),job.subject,job.body);
+                        await using var done=new NpgsqlCommand("UPDATE alert_outbox SET sent_at=now() WHERE id=@id AND sent_at IS NULL",c);
+                        done.Parameters.AddWithValue("id",job.id);await done.ExecuteNonQueryAsync();
+                    }catch(Exception ex){
+                        app.Logger.LogWarning(ex,"Low-stock email delivery failed for store {Store}",job.store);
+                        await using var retry=new NpgsqlCommand("UPDATE alert_outbox SET attempts=attempts+1,next_attempt=now()+interval '5 minutes' * LEAST(attempts+1,12) WHERE id=@id",c);
+                        retry.Parameters.AddWithValue("id",job.id);await retry.ExecuteNonQueryAsync();
+                    }
+                }
+            }
+        }catch(Exception ex){app.Logger.LogError(ex,"Low-stock mail worker error");}
+        try{await Task.Delay(TimeSpan.FromSeconds(30),mailCts.Token);}catch(OperationCanceledException){break;}
+    }
+});
+
 app.Run();
 record Setup(string? SetupToken,string? Pin,string? ConfirmPin);
 record Login(string? Pin,string? EmployeeId=null);
