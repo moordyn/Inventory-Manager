@@ -477,12 +477,12 @@ body[data-theme="glacier"] .login-screen>.login-card{background:color-mix(in srg
 
 /* Signed-in ambient background. Fixed viewport layer stays behind app UI and never accepts input. */
 #app.shell{position:relative;isolation:isolate;background:transparent}
-#app .app-aurora{position:fixed;inset:0;width:100vw;height:100dvh;z-index:0;pointer-events:none;opacity:.78}
+#app .app-aurora{position:fixed;inset:0;width:100vw;height:100dvh;z-index:0;pointer-events:none;opacity:1}
 #app.shell>.sidebar,#app.shell>.content{position:relative;z-index:1}
-#app.shell>.sidebar{position:sticky;background:color-mix(in srgb,var(--sidebar) 97%,transparent)}
+#app.shell>.sidebar{position:sticky;background:color-mix(in srgb,var(--sidebar) 93%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
 #app.shell>.content{background:transparent}
-#app.shell>.content .card{background:color-mix(in srgb,var(--panel) 98%,transparent)}
-body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srgb,var(--panel) 99%,transparent)}
+#app.shell>.content .card{background:color-mix(in srgb,var(--panel) 93%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+body[data-theme="glacier"] #app.shell>.content .card{background:color-mix(in srgb,var(--panel) 96%,transparent)}
 @media(max-width:760px){#app.shell>.sidebar{display:none}}
 @media(prefers-reduced-motion:reduce){
   #app .app-aurora{display:none}
@@ -839,34 +839,35 @@ const appAurora=(()=>{
   const scale=Math.min(window.devicePixelRatio||1,1.25);
   canvas.width=Math.round(width*scale);canvas.height=Math.round(height*scale);
   ctx.setTransform(scale,0,0,scale,0,0);
-  const radius=Math.min(Math.max(width,height)*.35,650);
+  const radius=Math.min(Math.max(width,height)*.42,800);
   clouds=[
-   {x:.05,y:.16,r:radius*1.12,phase:0,color:0},
-   {x:.82,y:.24,r:radius*1.32,phase:2.5,color:1},
-   {x:.40,y:.82,r:radius*1.24,phase:4.4,color:0},
-   {x:.91,y:.87,r:radius*.98,phase:1.2,color:2}
+   {x:.08,y:.12,r:radius*1.12,phase:0,color:0},
+   {x:.76,y:.18,r:radius*1.24,phase:2.5,color:1},
+   {x:.32,y:.72,r:radius*1.13,phase:4.4,color:0},
+   {x:.90,y:.82,r:radius*1.05,phase:1.2,color:2},
+   {x:.52,y:.48,r:radius*.88,phase:3.1,color:1}
   ];
  }
  function bloom(x,y,r,color,opacity){
   const g=ctx.createRadialGradient(x,y,0,x,y,r);
   const rgba=a=>'rgba('+color[0]+','+color[1]+','+color[2]+','+a+')';
-  g.addColorStop(0,rgba(opacity));g.addColorStop(.32,rgba(opacity*.43));
-  g.addColorStop(.75,rgba(opacity*.07));g.addColorStop(1,rgba(0));
+  g.addColorStop(0,rgba(opacity));g.addColorStop(.3,rgba(opacity*.65));
+  g.addColorStop(.7,rgba(opacity*.16));g.addColorStop(1,rgba(0));
   ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
  }
  function draw(now){
   if(!active)return;
   frame=requestAnimationFrame(draw);
   if(now-last<50)return; // at most 20 fps
-  const elapsed=Math.min(now-last||50,120);last=now;tick+=elapsed*.00013;
+  const elapsed=Math.min(now-last||50,120);last=now;tick+=elapsed*.00042;
   ctx.clearRect(0,0,width,height);
   if(!width||!height)return;
   const light=document.body.dataset.theme==='glacier';
   for(const c of clouds){
    bloom(
-    c.x*width+Math.sin(tick+c.phase)*width*.12,
-    c.y*height+Math.cos(tick*.7+c.phase)*height*.09,
-    c.r,colors[c.color],light?.075:.10
+    c.x*width+Math.sin(tick+c.phase)*width*.18,
+    c.y*height+Math.cos(tick*.85+c.phase)*height*.14,
+    c.r,colors[c.color],light?.26:.38
    );
   }
  }
