@@ -607,7 +607,7 @@ $('employeeForm').onsubmit=async e=>{e.preventDefault();try{token=(await api('au
 
 function updateLocationBrand(){
  const current=allowedStores.find(x=>x.id===identity?.storeId);
- $('locationBrand').textContent=current?.name||identity?.storeId||'Inventory Manager';$('mobileLocationName').textContent=current?.name||identity?.storeId||'Store';
+ $('locationBrand').textContent=current?.name||identity?.storeId||'ZAGG Inventory Manager';$('mobileLocationName').textContent=current?.name||identity?.storeId||'Store';
 }
 function renderStorePicker(){
  const wrap=$('storePickerWrap'),select=$('storePicker');
