@@ -566,8 +566,10 @@ async function initialize(){
   const query=new URLSearchParams(location.search);
   const emailedToken=query.get('authToken');
   if(emailedToken){
+   // Email links require a fresh authenticated sign-in afterward.
+   token='';identity=null;sessionStorage.removeItem('inventory-token');
    query.delete('authToken');
-   history.replaceState(null,'',location.pathname+(query.toString()?'?'+query.toString():'')+location.hash);
+   window.history.replaceState(null,'',location.pathname+(query.toString()?'?'+query.toString():'')+location.hash);
    await loadAuthEmailToken(emailedToken);
    return;
   }
