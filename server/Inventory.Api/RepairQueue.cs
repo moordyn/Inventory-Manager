@@ -180,18 +180,34 @@ static class RepairQueueEndpoints
             if(!ValidText(req.Device,120)||!ValidText(req.RepairType,150)||
                !ValidOptional(req.CustomerName,120)||!ValidOptional(req.CustomerContact,150)||
                !ValidOptional(req.SerialNumber,120)||!ValidOptional(req.Notes,2000)||
-               !ValidMoney(req.QuotedTotal)||!ValidMoney(req.PaidUpfront)||req.PaidUpfront>req.QuotedTotal)
+               !ValidMoney(req.QuotedTotal)||!ValidMoney(req.PaidUpfront)||req.PaidUpfront>req.QuotedTotal||
+               req.IdempotencyKey==Guid.Empty)
                 return Results.BadRequest("Invalid device, repair type, customer fields, quote or upfront payment.");
             var assignee=req.AssignedTo?.Trim();
             if(assignee is {Length:0})assignee=null;
             await using var c=await connect();
             await using var tx=await c.BeginTransactionAsync();
+            await LockKey(c,(NpgsqlTransaction)tx,req.IdempotencyKey);
+            await using(var duplicate=new NpgsqlCommand("""
+                SELECT id,store_id,device,repair_type,quoted_total,paid_upfront
+                FROM repair_tickets WHERE request_key=@key
+                """,c,tx)){
+                duplicate.Parameters.AddWithValue("key",req.IdempotencyKey);
+                await using var r=await duplicate.ExecuteReaderAsync();
+                if(await r.ReadAsync()){
+                    var same=r.GetString(1)==who.Value.store&&r.GetString(2)==req.Device!.Trim()&&
+                       r.GetString(3)==req.RepairType!.Trim()&&r.GetDecimal(4)==req.QuotedTotal&&
+                       r.GetDecimal(5)==req.PaidUpfront;
+                    return same?Results.Ok(new{id=r.GetInt64(0),duplicate=true})
+                               :Results.Conflict("Idempotency key is already used for another repair.");
+                }
+            }
             if(assignee is not null && !await AvailableEmployee(c,(NpgsqlTransaction)tx,who.Value.store,assignee))
                 return Results.BadRequest("Assigned employee must have access to this store.");
             await using var cmd=new NpgsqlCommand("""
                 INSERT INTO repair_tickets(store_id,created_by,device,repair_type,customer_name,customer_contact,
-                     serial_number,notes,quoted_total,paid_upfront,assigned_to)
-                VALUES(@store,@employee,@device,@type,@customer,@contact,@serial,@notes,@quote,@paid,@assigned)
+                     serial_number,notes,quoted_total,paid_upfront,assigned_to,request_key)
+                VALUES(@store,@employee,@device,@type,@customer,@contact,@serial,@notes,@quote,@paid,@assigned,@key)
                 RETURNING id
                 """,c,tx);
             cmd.Parameters.AddWithValue("store",who.Value.store);
@@ -204,6 +220,7 @@ static class RepairQueueEndpoints
             cmd.Parameters.AddWithValue("notes",(object?)req.Notes?.Trim()??DBNull.Value);
             cmd.Parameters.AddWithValue("quote",req.QuotedTotal);
             cmd.Parameters.AddWithValue("paid",req.PaidUpfront);
+            cmd.Parameters.AddWithValue("key",req.IdempotencyKey);
             cmd.Parameters.Add("assigned",NpgsqlDbType.Text).Value=(object?)assignee??DBNull.Value;
             var id=(long)(await cmd.ExecuteScalarAsync()??throw new InvalidOperationException("Repair creation failed"));
             await Event(c,(NpgsqlTransaction)tx,id,who.Value.store,who.Value.employee,
@@ -308,15 +325,17 @@ static class RepairQueueEndpoints
             await LockKey(c,(NpgsqlTransaction)tx,req.IdempotencyKey);
             // Duplicate requests are recognized before taking further stock.
             await using(var dup=new NpgsqlCommand("""
-                SELECT p.id,p.repair_id,p.item_id,p.quantity,p.movement_id
-                FROM repair_parts p WHERE p.request_key=@key
+                SELECT p.id,p.repair_id,p.item_id,p.quantity,p.movement_id,i.sku,i.barcode
+                FROM repair_parts p JOIN items i ON i.id=p.item_id WHERE p.request_key=@key
                 """,c,tx)){
                 dup.Parameters.AddWithValue("key",req.IdempotencyKey);
                 await using var reader=await dup.ExecuteReaderAsync();
                 if(await reader.ReadAsync()){
                     var existingId=reader.GetGuid(2);
-                    var same=reader.GetInt64(1)==id&&reader.GetInt32(3)==req.Quantity&&
-                        (req.ItemId==existingId||req.ItemId is null&&code.Length>0);
+                    var matchesItem=req.ItemId is not null?req.ItemId==existingId:
+                        code.Length>0&&(code==reader.GetString(5)||
+                          !reader.IsDBNull(6)&&code==reader.GetString(6));
+                    var same=reader.GetInt64(1)==id&&reader.GetInt32(3)==req.Quantity&&matchesItem;
                     return same?Results.Ok(new{duplicate=true,partId=reader.GetInt64(0),movementId=reader.GetInt64(4)})
                                :Results.Conflict("Idempotency key belongs to a different part request.");
                 }
@@ -462,7 +481,7 @@ static class RepairQueueEndpoints
 }
 
 record RepairCreateRequest(string? Device,string? RepairType,decimal QuotedTotal,decimal PaidUpfront,
-    string? CustomerName,string? CustomerContact,string? SerialNumber,string? Notes,string? AssignedTo);
+    string? CustomerName,string? CustomerContact,string? SerialNumber,string? Notes,string? AssignedTo,Guid IdempotencyKey);
 record RepairStatusRequest(string? Status);
 record RepairAssignRequest(string? EmployeeId);
 record RepairPaymentRequest(decimal Amount,Guid IdempotencyKey);
