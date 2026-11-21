@@ -761,12 +761,13 @@ Use [docs/ui-qa-checklist.md](ui-qa-checklist.md) for the more focused visual/UX
 
 ## 13. Environment variables and sensitive data
 
-The file <code>/opt/inventory-manager/.env</code> should be owned by an authorized administrator, restricted to mode **0600**, and stored in encrypted backups/password-manager procedures. The installer generates it only when missing; upgrades are designed to keep its values.
+The file <code>/opt/inventory-manager/.env</code> should be owned by an authorized administrator, restricted to mode **0600**, and stored in encrypted backups/password-manager procedures. A fresh installer creates it after receiving **the installer's own `PUBLIC_ORIGIN`**, then upgrades preserve existing values. Legacy installations that predate `PUBLIC_ORIGIN` receive their existing domain as a compatibility value instead of being silently migrated.
 
 | Variable | Where used | Required? | Handling |
 | --- | --- | --- | --- |
 | <code>POSTGRES_PASSWORD</code> | Database and API connection string via Compose | **Yes** | Installer generates 32 random bytes as hex; retain for existing volume |
 | <code>SETUP_TOKEN</code> | One-time admin PIN enrollment | **Yes** | Installer generates; printed by installer; don't publish |
+| <code>PUBLIC_ORIGIN</code> | **Your own canonical public HTTPS URL; also used for OAuth redirect validation** | **Yes on new installs** | Enter when first prompted, e.g. `https://inventory.example.com` **placeholder only**; no slash, port, path, query, or fragment; must match DNS/TLS/Google client |
 | <code>GOOGLE_TOKEN_KEY</code> | AES-GCM encryption/decryption of Google OAuth secrets and refresh tokens | **Yes for dashboard OAuth/Gmail** | 64 hex characters representing 32 bytes; **never rotate casually** |
 | <code>GOOGLE_CLIENT_ID</code> | Optional server-side OAuth client config | Optional | Dashboard-imported client may override at startup |
 | <code>GOOGLE_CLIENT_SECRET</code> | Optional server-side OAuth client config | Optional | Secret; never commit |
@@ -775,7 +776,9 @@ The file <code>/opt/inventory-manager/.env</code> should be owned by an authoriz
 
 Other runtime settings are in [deploy/compose.yml](../deploy/compose.yml): <code>ConnectionStrings__Inventory</code> points to <code>Host=db;Port=5432;Database=inventory;Username=inventory</code>, and <code>ASPNETCORE_URLS</code> is <code>http://+:8080</code> inside the API container.
 
-**Not in this file:** Cloudflare DDNS API token (stored in OPNsense), NPM password/SSL private key (stored by NPM), Google Cloud Console login (external), and employees' inventory credentials (stored by the app in PostgreSQL).
+**Not in this file:** Your DNS-provider or DDNS API token (kept in the corresponding DNS updater, if used), reverse-proxy administrative credentials and TLS private key, Google Cloud Console login, and employee records/credentials (in PostgreSQL). Cloudflare and OPNsense are optional.
+
+**To change `PUBLIC_ORIGIN`:** Back up `.env`, edit only the `PUBLIC_ORIGIN=https://your-real-domain` line, confirm corresponding DNS/HTTPS and Google client origin/redirect URI, then redeploy/restart the API via `sudo bash deploy/install.sh`. Never paste `.env` into support tickets.
 
 **Do not change** <code>POSTGRES_PASSWORD</code> in <code>.env</code> alone against an already initialized PostgreSQL volume: the Postgres image does not automatically reset an existing database role password just because the environment variable changes. Follow a controlled rotation procedure.
 
@@ -915,16 +918,24 @@ For a controlled code rollback, have an administrator check out a reviewed previ
 
 **Never run:** <code>docker compose down -v</code>, <code>docker volume prune</code>, or destructive SQL commands as an ordinary update/troubleshooting step.
 
-### 15.4 Domain migration reminder
+### 15.4 Change **your** domain without editing source code
 
-This installation deliberately uses <code>inventory.example.com</code>. A future domain change must coordinate:
-- Cloudflare DNS/DDNS record and OPNsense hostname.
-- NPM proxy hostname and TLS certificate.
-- Google Cloud client origin and callback.
-- The API constants <code>PublicOrigin</code> and <code>GoogleRedirect</code> and JSON/client importer validations.
-- Links in the runbooks and any printed materials.
+The application **no longer requires changing an API constant** to switch domains. The public URL comes from `PUBLIC_ORIGIN` in the installation's private `.env`. Plan the change as a coordinated migration:
 
-Keep the existing Google Client ID/secret if possible to preserve the global sender token, but test consent/callback again. Don't delete the previous authorized redirect until the replacement flow is verified.
+1. Record the original `PUBLIC_ORIGIN`, current Google OAuth Client ID and current Git commit; protect a database and `.env` backup.
+2. Create or update your new hostname's public DNS A/AAAA record or tunnel mapping. If dynamic, update the relevant DDNS zone and FQDN.
+3. Add a matching HTTPS reverse proxy host/certificate and test reachability.
+4. In the **existing Google OAuth Web client you control**, add the **new** JavaScript origin and exact redirect URI. Preserve the existing client ID/secret if you want the existing Gmail refresh token to remain potentially reusable.
+5. Edit `/opt/inventory-manager/.env` with one new line like `PUBLIC_ORIGIN=https://stock.yourcompany.com` (use your real domain; never print the other secrets).
+6. From the Ubuntu app directory, run `sudo bash deploy/install.sh` to recreate the API with its new origin, and confirm `docker compose ... ps`.
+7. Test `https://YOUR_NEW_HOSTNAME/health` in a browser and reconnect Google if the existing sender fails; any newly downloaded OAuth Web client JSON must list the same newly configured origin/redirect.
+8. Only after verification remove unused older DNS/proxy and Google authorized URLs. Keep a rollback plan and database/key backups.
+
+**Changing `PUBLIC_ORIGIN` alone does not configure DNS, TLS or Google Cloud**. The API will reject a syntactically invalid origin at startup rather than infer one from an untrusted request Host header.
+
+### 15.5 Existing installs from before PUBLIC_ORIGIN
+
+If you are upgrading an earlier installation that had its origin embedded in code, the installer writes a **legacy compatibility value** into `.env` when it is missing. This prevents an existing Google integration from silently switching hosts. For a new business/customer, use a fresh installation and enter **your own hostname at setup**. An older deployment that is being transferred to a different company must explicitly update `.env`, DNS, proxy and Google OAuth as described above.
 
 ## 16. Troubleshooting by symptom
 
@@ -1018,11 +1029,13 @@ A person other than the original developer should be able to walk through this c
 - [ ] Docker/Compose services are healthy and restart after a reboot.
 - [ ] <code>/health</code> and <code>/api/auth/status</code> respond on LAN.
 - [ ] Port 18424 cannot be reached from untrusted public networks.
-- [ ] OPNsense DDNS uses Cloudflare scoped token; apex A record tracks public IPv4.
-- [ ] NPM forwards hostname to correct LAN IP:18424.
-- [ ] WAN/NAT forwards only required TCP/443 and TCP/80 to NPM, not to inventory/database/admin ports.
-- [ ] External HTTPS works with Cloudflare Full (strict) and valid origin cert.
-- [ ] No old domain remains in active Google callbacks or NPM Inventory host rules.
+- [ ] `PUBLIC_ORIGIN` contains **my actual domain**, not the example `inventory.example.com`.
+- [ ] My DNS provider resolves **my chosen hostname** to the correct public IP or tunnel (static IP needs no DDNS).
+- [ ] If using Cloudflare/OPNsense DDNS, the token is zone-scoped and the DNS zone and FQDN are correct.
+- [ ] My reverse proxy routes **my hostname** to the correct app backend :18424 (or the reviewed alternative network).
+- [ ] WAN/NAT, if used, forwards only TCP/443 and the needed HTTP/ACME traffic to the HTTPS proxy.
+- [ ] Public HTTPS uses a valid matching certificate; Cloudflare Full (strict) applies **only if I use the Cloudflare proxy**.
+- [ ] Another business's domain is not referenced in my active DNS, proxy, `.env`, or OAuth configuration.
 
 ### Application
 - [ ] Global admin enrolls PIN once and logs in as OWNER.
@@ -1036,8 +1049,10 @@ A person other than the original developer should be able to walk through this c
 
 ### Google and alerts
 - [ ] Gmail API enabled in correct Google project; audience and scope appropriate.
-- [ ] Origin = <code>https://inventory.example.com</code>.
-- [ ] Callback = <code>https://inventory.example.com/api/google/callback</code>.
+- [ ] Google OAuth Web client is in **my own** Google Cloud project and its Client ID/Secret are mine.
+- [ ] Authorized JavaScript origin equals **my actual `PUBLIC_ORIGIN`** (not the sample hostname).
+- [ ] Authorized redirect URI equals **my actual `PUBLIC_ORIGIN + /api/google/callback`**.
+- [ ] The site's authorized registrable domain is configured under Google's required Branding/Authorized domains settings.
 - [ ] Latest OAuth Web client JSON imported by global admin; no secret committed.
 - [ ] Dedicated global Gmail sender connected and accurately displayed.
 - [ ] Each store has its own recipient list, alert toggle and successful **test email**.
