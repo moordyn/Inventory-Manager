@@ -110,18 +110,21 @@ jobs:
           if (!backend.includes('CREATE TABLE IF NOT EXISTS admin_audit') || !backend.includes('WriteAdminAudit(')) {
             throw new Error('Administrative activity persistence is missing');
           }
-          const origin = 'https://zagginventorymanager.com';
-          if (!backend.includes('const string PublicOrigin="'+origin+'";') ||
-              !backend.includes('const string GoogleRedirect=PublicOrigin+"/api/google/callback";') ||
+          // Domain belongs to the installer, not this repository's maintainer.
+          if (!backend.includes('Environment.GetEnvironmentVariable("PUBLIC_ORIGIN")') ||
+              !backend.includes('var GoogleRedirect=PublicOrigin+"/api/google/callback";') ||
               !backend.includes('x.GetString()==PublicOrigin')) {
-            throw new Error('Google OAuth public domain, callback, or validation is incorrect');
-          }
-          if (backend.includes('inv.mrmschf.xyz')) {
-            throw new Error('Retired OAuth hostname still referenced in application code');
+            throw new Error('Google OAuth callback and import validation must use configurable PUBLIC_ORIGIN');
           }
           const importer = fs.readFileSync('deploy/configure-google.sh','utf8');
-          if (!importer.includes(origin+'/api/google/callback') || importer.includes('inv.mrmschf.xyz')) {
-            throw new Error('Google configuration importer is not using the new domain');
+          const installer = fs.readFileSync('deploy/install.sh','utf8');
+          const compose = fs.readFileSync('deploy/compose.yml','utf8');
+          if (!importer.includes('public_origin = values_from_env.get("PUBLIC_ORIGIN"') ||
+              !importer.includes('expected_callback = public_origin + "/api/google/callback"') ||
+              !importer.includes('public_origin not in origins') ||
+              !installer.includes('PUBLIC_ORIGIN=%s') ||
+              !compose.includes('PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-')) {
+            throw new Error('Bring-your-own-domain installer, Compose or Google import is not wired correctly');
           }
           for (const marker of [
             'data-edit-checkout-note', 'data-save-checkout-note',
@@ -153,7 +156,9 @@ jobs:
           ConnectionStrings__Inventory: Host=127.0.0.1;Port=5432;Database=inventory;Username=postgres;Password=integration-test-only
           SETUP_TOKEN: 0123456789abcdef0123456789abcdef01234567
           GOOGLE_TOKEN_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          PUBLIC_ORIGIN: https://inventory.example.com
         run: |
+          bash -n deploy/install.sh deploy/configure-google.sh deploy/backup.sh
           node --check tests/api-smoke.mjs
           node tests/checkout-note-ui.mjs
           dotnet run --project server/Inventory.Api/Inventory.Api.csproj --configuration Release --no-build > /tmp/zagg-api.log 2>&1 &
