@@ -92,6 +92,8 @@ In **Nginx Proxy Manager** (or equivalent), add a proxy host:
 | Public certificate | Valid certificate covering that domain; enable HTTPS redirect |
 | Proxy admin interface | Private/trusted management network only |
 
+For a step-by-step Cloudflare, OPNsense DDNS and Nginx Proxy Manager configuration, see [Optional networking examples](networking-examples.md).
+
 For Cloudflare orange-cloud proxy, use a valid origin certificate and **Full (strict)** SSL; avoid Flexible mode and conflicting redirect loops. Ensure DNS, TLS certificate SAN, proxy hostname, `.env` `PUBLIC_ORIGIN`, and Google OAuth URIs match **exactly** (including `www` vs non-`www`). Test:
 
 ```bash
