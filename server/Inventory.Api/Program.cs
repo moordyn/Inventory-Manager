@@ -721,13 +721,12 @@ app.MapPost("/api/admin/google-oauth/import",async (HttpContext ctx,GoogleOAuthI
     if(!who.Value.globalAdmin)return Results.StatusCode(StatusCodes.Status403Forbidden);
     if(googleKey is not {Length:32})return Results.BadRequest("The server encryption key is missing. Run the installer to configure GOOGLE_TOKEN_KEY first.");
     if(req.Json is null||req.Json.Length>24_576||req.Json.Length==0)return Results.BadRequest("Choose a Google OAuth JSON file smaller than 24 KB.");
-    if(!PinValid(req.Pin))return Results.BadRequest("Enter the six-digit administrator PIN.");
+    if(string.IsNullOrEmpty(req.Password))return Results.BadRequest("Confirm your administrator account password.");
 
     await using var c=await Connect();
-    await using(var pinCmd=new NpgsqlCommand("SELECT value FROM settings WHERE key='pin'",c)){
-        var stored=(string?)await pinCmd.ExecuteScalarAsync();
-        var parts=stored?.Split(':');
-        if(parts is null||parts.Length!=2||!Equal(PinHash(req.Pin!,Convert.FromHexString(parts[0])),parts[1]))return Results.Unauthorized();
+    await using(var checkPassword=new NpgsqlCommand("SELECT password_hash FROM employees WHERE id=@id AND active AND global_admin",c)){
+        checkPassword.Parameters.AddWithValue("id",who.Value.employee);
+        if(!PasswordMatches(req.Password,(string?)await checkPassword.ExecuteScalarAsync()))return Results.Unauthorized();
     }
 
     string clientId,clientSecret;
@@ -1472,14 +1471,17 @@ _ = Task.Run(async ()=>{
 });
 
 app.Run();
-record Setup(string? SetupToken,string? Pin,string? ConfirmPin);
-record Login(string? Pin,string? EmployeeId=null);
+record Setup(string? SetupToken,string? Email,string? ConfirmEmail,string? Password,string? ConfirmPassword);
+record ActivateAccount(string? EmployeeId,string? Email,string? ConfirmEmail,string? Password,string? ConfirmPassword);
+record ForgotPassword(string? EmployeeId);
+record AuthEmailToken(string? Token);
+record CompleteAuthToken(string? Token,string? Password,string? ConfirmPassword);
 record NewItem(string Sku,string Name,int Quantity,string? Barcode="",string? Category="",string? Description="",int MinStock=0,decimal? UnitCost=null);
 record MovementRequest(int Delta,string? Note,Guid IdempotencyKey);
 record CheckoutNoteUpdate(string? Note,int ExpectedRevision);
 record EditItem(string Sku,string Name,string? Barcode,string? Category,string? Description,int MinStock,decimal? UnitCost);
 
-record EmployeeLogin(string? EmployeeId);
+record EmployeeLogin(string? EmployeeId,string? Password);
 record SelectStore(string? StoreId);
 record StoreRequest(string? Id,string? Name);
 record EmployeeRequest(string? StoreId,string? Id,string? Name);
@@ -1492,4 +1494,4 @@ record EmployeePermissions(bool GlobalAdmin,string[]? StoreAdminIds);
 record DeleteItemRequest(string? Confirmation);
 
 record GoogleOAuthCredentials(string ClientId,string ClientSecret);
-record GoogleOAuthImportRequest(string? Json,string? Pin);
+record GoogleOAuthImportRequest(string? Json,string? Password);
