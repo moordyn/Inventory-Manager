@@ -27,6 +27,7 @@ Replace `inventory.example.com` with a hostname **you control** (root domain or 
 - Individual employee passwords, email verification, password recovery, 15-minute idle expiration.
 - Employee self-service email changes (new-address confirmation); **only global admins** may change employee IDs, including their own. Renames revoke active sessions; the original recovery administrator retains global privileges if renamed.
 - One global Gmail API sender for store-specific low-stock recipients; optional SMTP fallback.
+- Five coordinated dark themes (Evergreen, Deep Purple, Midnight Ocean, Copper Ember, Rose Noir). Each employee saves a personal dashboard theme; only global admins set the public login theme. Theme-matched wordmarks and favicons are included.
 
 ## Documentation
 
@@ -36,6 +37,7 @@ Replace `inventory.example.com` with a hostname **you control** (root domain or 
 | Optional Cloudflare DNS, OPNsense DDNS and Nginx Proxy Manager detail | [Networking examples](docs/networking-examples.md) |
 | First-run owner, employees, roles, email, ID changes, security model | [Accounts and permissions](docs/accounts.md) |
 | Backups, restore, troubleshooting, monitoring, disaster recovery | [Operations](docs/operations.md) |
+| Personal themes, login appearance and matching logo variants | [Themes](docs/themes.md) |
 | Service/data design and source locations | [Architecture](docs/architecture.md) |
 | Desktop, mobile, camera and release acceptance tests | [QA checklist](docs/ui-qa-checklist.md) |
 | Changes by version | [Changelog](CHANGELOG.md), [v1.2.0 notes](docs/releases/v1.2.0.md), and [releases](docs/releases/) |
