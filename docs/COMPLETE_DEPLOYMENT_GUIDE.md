@@ -160,33 +160,33 @@ The **application** deployment remains Docker Compose on a supported Ubuntu host
 
 ---
 
-## 3. Prerequisites and Proxmox preparation
+## 3. Prerequisites and Ubuntu/Proxmox preparation
 
-### 3.1 Required access
+### 3.1 What you need — select your own providers
 
-Before beginning, ensure you can administer:
-1. A Proxmox host with the ability to create/manage an Ubuntu 24.04 container.
-2. The Ubuntu LXC as root (or a sudo-capable account).
-3. OPNsense WAN/LAN/NAT/firewall.
-4. Cloudflare DNS for <code>inventory.example.com</code>.
-5. The Nginx Proxy Manager instance that receives HTTPS traffic.
-6. A Google Cloud project and the Gmail/Workspace account that will send alerts.
-7. GitHub access to the code repository and a tested offsite backup location.
+Before installing, obtain access to:
 
-### 3.2 Proxmox LXC
+1. A functioning **Ubuntu 24.04** host with administrator access (a Proxmox LXC, VM, or suitable dedicated host).
+2. A domain that **you control or are authorized to use**. Register it yourself if you do not yet have one.
+3. DNS management for that domain (Cloudflare **or another DNS provider**).
+4. An external HTTPS traffic path (static public IP, DDNS + router port forwarding, VPS, or a supported tunnel); determine if CGNAT applies.
+5. An HTTPS reverse proxy (examples use **Nginx Proxy Manager**; equivalent maintained proxies are possible).
+6. **Optional for email alerts:** Your own Google Cloud project, Gmail API access, OAuth Web application client, and company-controlled sending Gmail/Workspace account.
+7. GitHub/network access to this repository, an offsite backup destination, and an administrator responsible for the app.
 
-Create an **Ubuntu 24.04** container (not an older Ubuntu release). Suggested *starting* resources for a small franchise are **2 vCPU, 2–4 GB RAM and 20+ GB disk**, adjusted after watching actual utilization. These are sizing suggestions rather than hard minimums.
+**Cloudflare, OPNsense, and Proxmox are examples, not mandatory purchases.** The provided installer, however, specifically expects Ubuntu 24.04 and deploys Docker.
 
-- Set a strong root password or provision a secure administrative SSH key.
-- Put the LXC on a network that can reach PostgreSQL inside Docker, the NPM proxy, GitHub/Docker registries, DNS, and Google HTTPS endpoints.
-- Assign a stable IP via static configuration or DHCP reservation. Record this as <code>INVENTORY_LXC_IP</code>.
-- Set correct clock/timezone and keep NTP working; incorrect time can break TLS and OAuth.
-- For Docker inside LXC, configure appropriate Proxmox container features such as **nesting**, and **keyctl if required by your exact Docker/LXC configuration**. A VM is a valid alternative if Docker-in-LXC restrictions become problematic.
-- Avoid privileged containers merely to make Docker work without understanding the added risk. Review your Proxmox security and backup policy.
-- Ensure the LXC firewall allows **LAN/NPM to TCP/18424** and outbound DNS/HTTPS, but no inbound WAN access to TCP/18424.
-- Confirm root has enough storage for the Docker images, database volume and logs; backup files are on host storage and also require room.
+### 3.2 Prepare your Ubuntu host (example: Proxmox LXC)
 
-Inside Ubuntu, verify basic access:
+Create an Ubuntu 24.04 container; suggested *starting* resources for a small business: **2 vCPU, 2–4 GB RAM, 20+ GB storage**, scaled to actual load. A full VM may be preferable if Docker-in-LXC feature/security limitations arise.
+
+- Use a dedicated host/LXC with a stable LAN IPv4 or DHCP reservation. Record it as `INVENTORY_LXC_IP`.
+- Keep Ubuntu's date/time and NTP accurate and install security updates.
+- For Docker in a Proxmox LXC, configure supported nesting/keyctl features if required. Avoid unnecessary privileged containers.
+- Permit only the HTTPS proxy/trusted admin network to reach the application's host port **18424**; never publicly forward it.
+- Allow necessary outbound DNS, HTTPS, Docker image registries, GitHub, and Google API endpoints (if using Gmail).
+- Check disk/RAM, power protection, snapshots **as a secondary safeguard**, and offsite backups.
+- If the host is a VPS with a public IP, restrict **18424** in its cloud firewall and use a secure HTTPS proxy on an appropriate network interface.
 
 ~~~bash
 cat /etc/os-release
@@ -198,88 +198,113 @@ ip route
 getent hosts github.com
 ~~~
 
-The installer intentionally aborts if <code>/etc/os-release</code> is not Ubuntu 24.04.
+If the host is not Ubuntu 24.04, the installer exits by design. Do not bypass the version check without porting and testing the deployment scripts.
 
-### 3.3 Production warning about credentials
+### 3.3 Security gate before Internet exposure
 
-The current ordinary employee login is **employee-ID-only**. Employee IDs are identifiers, **not passwords**. A store-admin role can be associated with this login path. Do not rely on that as your sole security control on a publicly reachable business system. Prefer a VPN/identity-aware access gateway with MFA for the intended users, together with implementing real per-user credentials in the application. Cloudflare Access is one possible additional control; if enabled, test the OAuth callback and mobile-browser flows carefully.
+**Current ordinary employee login requires an employee ID only; it is not strong authentication.** A store administrator role can be reachable from such a login session. Put the installation behind a trusted VPN or identity-aware gateway with MFA and/or implement strong individual user credentials before exposing business data on a public domain. Test the OAuth callback, browser/mobile scanners, authorized customer devices and alert delivery with any gateway restrictions. Rebranding is also required when using the software outside the rights attached to its existing ZAGG visual assets.
+
+---
 
 ## 4. Install Inventory Manager from scratch
 
-### 4.1 Connect to the correct Ubuntu LXC
+### 4.1 Choose the final HTTPS hostname **before installing**
 
-SSH into the **Inventory Manager** LXC or open its Proxmox console, then become root:
+You bring your own public site name. Decide on the exact canonical URL **now**. Examples:
+
+| Desired site | Enter when asked for PUBLIC_ORIGIN |
+| --- | --- |
+| Subdomain `inventory.example.com` | `https://inventory.example.com` |
+| Root `example.com` | `https://example.com` |
+| Another subdomain `stock.shop.example.com` | `https://stock.shop.example.com` |
+
+**All are examples. Replace with a domain YOU control.** The accepted value must be HTTPS with a DNS hostname, no trailing slash, no path, no query, no custom port. The same exact value will later be the Google JavaScript origin; append `/api/google/callback` for the Google OAuth redirect URI.
+
+The installer now prompts for `PUBLIC_ORIGIN` the **first time** it creates `.env`. A non-interactive installation must supply `PUBLIC_ORIGIN` explicitly. Installing with one hostname and later moving to another is supported, but requires editing `.env`, configuring DNS/TLS and updating Google Cloud (§15.4).
+
+### 4.2 Connect to the correct Ubuntu server
+
+SSH into the **inventory application Ubuntu machine** or open its Proxmox console and become root:
 
 ~~~bash
 sudo -i
 ~~~
 
-Confirm you are in the correct machine using <code>hostname</code> and <code>hostname -I</code>. Do **not** run the installer on OPNsense, the Proxmox host, the NPM LXC, or an unrelated application host.
+Do not run this script on your DNS provider, OPNsense, the Proxmox hypervisor or the NPM server unless that machine was intentionally provisioned as the Ubuntu app host.
 
-### 4.2 Inspect the installer before running it
-
-From the Ubuntu LXC:
+### 4.3 Inspect the installer
 
 ~~~bash
 curl -fsSL https://raw.githubusercontent.com/moordyn/Inventory-Manager/main/deploy/install.sh -o /tmp/inventory-install.sh
 less /tmp/inventory-install.sh
 ~~~
 
-The script is in the repository at [deploy/install.sh](../deploy/install.sh). Its current behavior is to:
+The script [deploy/install.sh](../deploy/install.sh):
+1. Requires root and Ubuntu 24.04.
+2. Installs prerequisites, Docker Engine and Compose if necessary.
+3. Clones/pulls the repository into `/opt/inventory-manager` (a dirty checkout stops the update).
+4. On first installation, **prompts for your HTTPS PUBLIC_ORIGIN** or reads it from the shell environment; rejects invalid names.
+5. Creates `/opt/inventory-manager/.env` containing your `PUBLIC_ORIGIN` plus random `POSTGRES_PASSWORD` and `SETUP_TOKEN`; creates a persistent `GOOGLE_TOKEN_KEY`.
+6. Starts the PostgreSQL and API Docker services; installs and enables the 03:15 database backup timer.
+7. Prints the LAN URL and one-time setup token. **Keep this token out of public logs/screenshots.**
 
-1. Require root and Ubuntu 24.04.
-2. Install <code>ca-certificates</code>, <code>curl</code>, <code>git</code>, <code>openssl</code> and <code>python3</code>.
-3. Install Docker Engine/Compose plugin from Docker's Ubuntu repository **if Docker/Compose is unavailable**.
-4. Enable and start Docker.
-5. Clone the main repository to <code>/opt/inventory-manager</code>, or <code>git pull --ff-only</code> an existing clean checkout. It **refuses a nonempty non-repository directory or uncommitted tracked changes**.
-6. Create a private <code>.env</code> if missing, with randomly generated <code>POSTGRES_PASSWORD</code> and <code>SETUP_TOKEN</code>.
-7. Preserve the existing <code>.env</code> and its secrets on upgrades; add a <code>GOOGLE_TOKEN_KEY</code> if absent. It does not silently rotate a key.
-8. Build and start Docker Compose services <code>db</code> and <code>api</code>, with the database in a persistent named volume.
-9. Install and enable the systemd daily backup timer.
-10. Print the LAN URL and **the installation token**. Keep the terminal transcript private.
+### 4.4 Run a fresh install — interactive or unattended
 
-### 4.3 Run the install
+**Interactive** (recommended for first installation):
 
 ~~~bash
 bash /tmp/inventory-install.sh
 ~~~
 
-If you have already installed the application and have a local checkout, the supported update command is instead:
+When prompted, **type your own** `PUBLIC_ORIGIN`, such as `https://inventory.yourcompany.com`.
+
+**Unattended/noninteractive** (example syntax; replace hostname!):
+
+~~~bash
+sudo PUBLIC_ORIGIN=https://inventory.example.com bash /tmp/inventory-install.sh
+~~~
+
+The command deliberately refuses an unattended **first install** when the domain has not been supplied. There is no default DNS zone you can assume belongs to the application developer.
+
+**Existing server update:**
 
 ~~~bash
 cd /opt/inventory-manager
 sudo bash deploy/install.sh
 ~~~
 
-Do **not** create a new <code>.env</code> or use <code>docker compose down -v</code> to “fix” an existing installation. The latter can delete the database volume.
+The installer preserves existing secrets and domain settings. Legacy installations that were created before `PUBLIC_ORIGIN` existed receive the former production domain as a **compatibility value**; the operator must change it deliberately when migrating. This migration behavior is for existing installations only, **not** a domain everyone can use.
 
-### 4.4 Check containers and health
+### 4.5 Verify actual configuration without printing secrets
 
 ~~~bash
 cd /opt/inventory-manager
-docker compose --env-file .env -f deploy/compose.yml ps
-docker compose --env-file .env -f deploy/compose.yml logs --tail 100 api
-docker compose --env-file .env -f deploy/compose.yml logs --tail 100 db
+sudo grep '^PUBLIC_ORIGIN=' .env
+sudo docker compose --env-file .env -f deploy/compose.yml ps
+sudo docker compose --env-file .env -f deploy/compose.yml logs --tail 100 api
+sudo docker compose --env-file .env -f deploy/compose.yml logs --tail 100 db
 curl -fsS http://127.0.0.1:18424/health
 curl -fsS http://127.0.0.1:18424/api/auth/status
 ~~~
 
-Expected broad results:
-- Both services running; the <code>db</code> service becomes healthy.
-- <code>/health</code> responds with a JSON status such as <code>{"status":"ok"}</code>; this **does not** test full DB availability.
-- <code>/api/auth/status</code> returns <code>initialized:false</code> on a never-enrolled database, and <code>true</code> after initial setup.
-- From a different LAN computer, <code>http://INVENTORY_LXC_IP:18424</code> loads the page **if allowed by your LAN firewall**.
+The printed `PUBLIC_ORIGIN` must be **your** domain, not the example. Do **not** print the full `.env` for support or paste it into chat.
 
-Because the Compose file forwards <code>18424:8080</code>, the app is accessible on the Ubuntu host's listening interfaces; prevent exposure by firewall and proxy design, not by assuming this port is localhost-only.
+The API/database should be healthy and the LAN HTTP port should respond. A new database shows `initialized:false` until the PIN setup. `/health` tests API process status, **not** all workflows or database health.
 
-### 4.5 Understand data persistence
+The current Compose file maps host **18424** to API container **8080**, with PostgreSQL on the internal Docker network. Block unsolicited access to 18424 from the Internet.
 
-- PostgreSQL data: Docker named volume for the <code>db</code> service, declared as <code>inventory_data</code>. Docker Compose may prefix the actual volume name with the project name. Get the real name with <code>docker volume ls</code> or <code>docker compose ... config</code>.
-- App code/images: replaceable by a new build; **not** where persistent inventory is stored.
-- Secrets: <code>/opt/inventory-manager/.env</code>; this file is ignored by Git.
-- Google OAuth client secret imported through the dashboard: encrypted and saved in PostgreSQL; decryption relies on the persistent <code>GOOGLE_TOKEN_KEY</code> in <code>.env</code>.
-- Connected global Gmail refresh token: encrypted in PostgreSQL, also dependent on <code>GOOGLE_TOKEN_KEY</code>.
-- SQL backups: <code>/var/backups/inventory-manager</code>; separate from the database volume.
+### 4.6 Persistence and what updates don't erase
+
+- PostgreSQL persists in a Docker named volume (`inventory_data`; actual volume name may have a Compose project prefix).
+- Application source and images can be rebuilt; the data volume is not meant to be deleted.
+- `.env` is private/ignored by Git; it holds the canonical site origin and the key protecting Google refresh tokens.
+- Gmail client secrets imported through the dashboard and refresh tokens are encrypted in PostgreSQL, using the unchanged `GOOGLE_TOKEN_KEY`.
+- SQL backups go to `/var/backups/inventory-manager` and **must** be copied to a separate protected location.
+- Never run `docker compose down -v` or `docker volume prune` as a routine update.
+
+**Next:** set up your DNS and HTTPS route using §6–§8, then complete the first-run PIN and optional Google authorization.
+
+---
 
 ## 5. Initial admin PIN and store onboarding
 
