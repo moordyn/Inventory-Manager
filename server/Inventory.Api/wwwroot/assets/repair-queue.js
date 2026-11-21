@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const STATUS={checked_in:'Checked In',in_progress:'In Progress',waiting_parts:'Waiting for Parts',ready:'Ready for Pickup',completed:'Completed',cancelled:'Cancelled'};
-let rows=[],historical=false,loading=false,version=0,technicians=[],cameraTicketId=null;
+let rows=[],historical=false,loading=false,version=0,cameraTicketId=null;
 const $r=id=>document.getElementById(id);
 const safe=v=>esc(v??'');
 const usd=v=>money(Number(v||0));
@@ -10,14 +10,10 @@ const key=()=>crypto.randomUUID();
 const closed=t=>t.status==='completed'||t.status==='cancelled';
 const status=v=>STATUS[v]||v;
 function reset(){
- version++;rows=[];historical=false;technicians=[];cameraTicketId=null;loading=false;
+ version++;rows=[];historical=false;cameraTicketId=null;loading=false;
  if($r('repairShowHistory'))$r('repairShowHistory').checked=false;
  if($r('repairSearch'))$r('repairSearch').value='';
  if($r('repairQueueList'))$r('repairQueueList').innerHTML='<div class="empty">Open the Repairs tab to load this location.</div>';
-}
-async function techniciansList(){technicians=await api('repairs/technicians');return technicians;}
-function techOptions(selected){
- return '<option value="">Unassigned</option>'+technicians.map(t=>'<option value="'+safe(t.id)+'"'+(t.id===selected?' selected':'')+'>'+safe(t.name)+' ('+safe(t.id)+')</option>').join('');
 }
 function renderList(){
  const el=$r('repairQueueList'),summary=$r('repairQueueSummary');
@@ -36,7 +32,7 @@ function renderList(){
     '<div><small>Balance due</small><strong>'+usd(r.balanceDue)+'</strong></div>'+
     '<div><small>Parts used</small><strong>'+Number(r.partsUsed)+'</strong></div></div>'+
    '<div class="repair-ticket-footer"><div class="repair-ticket-meta">Checked in by <strong>'+safe(r.createdByName)+' ('+safe(r.createdBy)+')</strong><br>'+
-    (r.assignedTo?'Technician: '+safe(r.assignedTo):'Unassigned')+'</div>'+
+    'Technician: '+safe(r.createdByName)+' ('+safe(r.createdBy)+')'+'</div>'+
     '<button type="button" class="btn" data-repair-open="'+Number(r.id)+'">Open ticket</button></div></article>'
  ).join(''):'<div class="empty">'+(historical?'No completed or cancelled repairs.':'No active repairs at this location.')+'</div>';
 }
@@ -49,7 +45,6 @@ async function refresh(){
 }
 function field(name,value){return '<div><small class="muted">'+safe(name)+'</small><strong>'+safe(value||'—')+'</strong></div>'}
 async function createTicket(){
- try{await techniciansList()}catch(err){toast('Could not load technicians: '+err.message,true);return}
  modal('Check in repair','<form id="repairCreateForm"><div class="form-grid">'+
   '<div><label for="repairDevice">Device *</label><input id="repairDevice" required maxlength="120" placeholder="iPhone 14 Pro"></div>'+
   '<div><label for="repairType">Repair type *</label><input id="repairType" required maxlength="150" placeholder="Soft OLED replacement"></div>'+
@@ -58,9 +53,8 @@ async function createTicket(){
   '<div><label for="repairCustomer">Customer name</label><input id="repairCustomer" maxlength="120"></div>'+
   '<div><label for="repairContact">Customer contact</label><input id="repairContact" maxlength="150"></div>'+
   '<div><label for="repairSerial">Serial / IMEI</label><input id="repairSerial" maxlength="120"></div>'+
-  '<div><label for="repairAssignee">Assigned technician</label><select id="repairAssignee">'+techOptions('')+'</select></div>'+
   '<div class="span2"><label for="repairNotes">Internal repair notes</label><textarea id="repairNotes" maxlength="2000" rows="3"></textarea></div></div>'+
-  '<p class="repair-muted">Check-in employee and time are recorded automatically. Money entered here is for tracking only; no charge is processed.</p>'+
+  '<p class="repair-muted">The signed-in employee is automatically assigned as technician and recorded as the check-in employee. Payments are tracking only; no charge is processed.</p>'+
   '<div class="modal-actions"><button type="button" class="btn" id="repairCancelCreate">Cancel</button><button class="btn primary" id="repairSubmitCreate">Add to queue</button></div></form>');
  $r('repairCancelCreate').onclick=closeModal;
  $r('repairCreateForm').onsubmit=async e=>{
@@ -73,7 +67,7 @@ async function createTicket(){
     device:$r('repairDevice').value.trim(),repairType:$r('repairType').value.trim(),
     quotedTotal:quote,paidUpfront:upfront,customerName:$r('repairCustomer').value.trim(),
     customerContact:$r('repairContact').value.trim(),serialNumber:$r('repairSerial').value.trim(),
-    notes:$r('repairNotes').value.trim(),assignedTo:$r('repairAssignee').value||null,
+    notes:$r('repairNotes').value.trim(),
     idempotencyKey:form.dataset.requestKey
    });
    closeModal();toast('Repair #'+result.id+' checked in');await refresh();await openTicket(result.id);
@@ -84,7 +78,7 @@ async function createTicket(){
 }
 async function openTicket(id,scanned=''){
  let detail;
- try{[detail]=await Promise.all([api('repairs/'+id),techniciansList()])}
+ try{detail=await api('repairs/'+id)}
  catch(err){toast('Cannot open repair: '+err.message,true);return}
  const t=detail.ticket,lock=closed(t);
  const partLines=detail.parts.map(p=>'<div class="repair-detail-line"><div><strong>'+safe(p.name)+'</strong> · '+safe(p.sku)+
@@ -104,13 +98,11 @@ async function openTicket(id,scanned=''){
    field('Quoted',usd(t.quotedTotal))+field('Upfront',usd(t.paidUpfront))+
    field('Additional paid',usd(t.additionalPaid))+field('Balance due',usd(t.balanceDue))+
    field('Customer',t.customerName)+field('Contact',t.customerContact)+
-   field('Serial / IMEI',t.serialNumber)+field('Technician',t.assignedTo)+'</div>'+
+   field('Serial / IMEI',t.serialNumber)+field('Technician (checked in by)',t.createdByName+' ('+t.createdBy+')')+'</div>'+
   (t.notes?'<p class="repair-muted"><strong>Internal notes:</strong> '+safe(t.notes)+'</p>':'')+
-  '<section class="repair-details-section"><h3>Status & technician</h3>'+
+  '<section class="repair-details-section"><h3>Repair status</h3>'+
    '<div class="repair-inline-control"><div><label for="repairStatusSelect">Status</label><select id="repairStatusSelect">'+statusOptions+'</select></div>'+
    '<button type="button" class="btn" id="repairStatusSave">Update status</button></div>'+
-   '<div class="repair-inline-control"><div><label for="repairTechnicianSelect">Technician</label><select id="repairTechnicianSelect">'+techOptions(t.assignedTo)+'</select></div>'+
-   '<button type="button" class="btn" id="repairAssigneeSave">Assign</button></div>'+
    '<p class="repair-muted">Completed and cancelled repairs move to history. Reopen a ticket before adding parts.</p></section>'+
   '<section class="repair-details-section"><h3>Parts used</h3><div class="repair-detail-list">'+(partLines||'<p class="muted">No parts recorded yet.</p>')+'</div>'+
    '<form id="repairPartForm"><div class="repair-inline-control">'+
@@ -130,11 +122,6 @@ async function openTicket(id,scanned=''){
  $r('repairStatusSave').onclick=async()=>{
   const button=$r('repairStatusSave');if(button.disabled)return;button.disabled=true;
   try{await api('repairs/'+id+'/status','PUT',{status:$r('repairStatusSelect').value});toast('Repair status saved');await refresh();await openTicket(id)}
-  catch(err){toast(err.message,true);button.disabled=false}
- };
- $r('repairAssigneeSave').onclick=async()=>{
-  const button=$r('repairAssigneeSave');if(button.disabled)return;button.disabled=true;
-  try{await api('repairs/'+id+'/assign','PUT',{employeeId:$r('repairTechnicianSelect').value||null});toast('Technician saved');await refresh();await openTicket(id)}
   catch(err){toast(err.message,true);button.disabled=false}
  };
  const partForm=$r('repairPartForm');
