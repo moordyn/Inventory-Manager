@@ -47,6 +47,7 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] The public theme appears on new anonymous page loads, first-time setup, password reset and sign-out. A login restores the employee's personal theme.
 - [ ] Each theme's logo preserves shape/legibility; favicon and meta theme-color match.
 - [ ] Glacier Light switches the browser to light color-scheme; typography, tables, tags, buttons, inputs, modals, toasts, warnings and responsive cards remain readable, without light-on-light text.
+- [ ] Desktop sidebar links (Home, Inventory, Check In, Check Out, History, Administration and Settings) and mobile navigation hover/focus use the selected palette rather than a fixed charcoal/green background.
 - [ ] Search field background, border, placeholder and focus/hover styling follow the selected palette on every theme, including Glacier Light.
 - [ ] Desktop inventory rows and responsive/mobile product cards use theme-colored hover highlighting instead of the old hardcoded charcoal/white overlay.
 - [ ] Glacier Light uses a dark-on-light logo; dark themes retain light-on-dark logos.
