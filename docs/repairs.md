@@ -1,6 +1,6 @@
 # Repair Queue
 
-The **Repair Queue** page tracks device repairs separately from inventory receiving and checkout. The queue shows active tickets oldest check-in first, with ticket number, who checked it in, device, repair type, total quote, upfront payment, outstanding balance, technician, and the number of consumed parts. Completed and cancelled repairs remain in a separate history view.
+The **Repair Queue** page tracks device repairs separately from inventory receiving and checkout. The queue shows active tickets oldest check-in first, with ticket number, who checked it in, device, repair type, total quote, upfront payment, outstanding balance, technician, and the number of consumed parts. Completed repairs remain in the active queue until paid/picked up; paid/picked-up and cancelled repairs remain in a separate history view.
 
 ## Check in a repair
 
