@@ -29,6 +29,26 @@ static bool Equal(string a, string b) => CryptographicOperations.FixedTimeEquals
 static bool PinValid(string? p) => p is not null && Regex.IsMatch(p, @"^[0-9]{6}$");
 static string PinHash(string pin, byte[] salt) => Convert.ToHexString(Rfc2898DeriveBytes.Pbkdf2(pin, salt, 600_000, HashAlgorithmName.SHA256, 32));
 async Task<NpgsqlConnection> Connect() { var c = new NpgsqlConnection(cs); await c.OpenAsync(); return c; }
+static string CsvField(string? raw){
+    var value=raw??"";
+    // Escape spreadsheet formulas supplied in SKU/name/category/description.
+    if(value.Length>0&&"=+-@\t\r\n".Contains(value[0]))value="'"+value;
+    return "\"" + value.Replace("\"","\"""") + "\"";
+}
+static IResult CsvFile(string content,string filename){
+    var bytes=Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(content)).ToArray();
+    return Results.File(bytes,"text/csv; charset=utf-8",filename);
+}
+async Task WriteAdminAudit(NpgsqlConnection conn,NpgsqlTransaction? tx,string actor,string? store,string action,string target,string details=""){
+    await using var cmd=new NpgsqlCommand("INSERT INTO admin_audit(actor_employee_id,store_id,action,target,details) VALUES(@actor,@store,@action,@target,@details)",conn,tx);
+    cmd.Parameters.AddWithValue("actor",actor);
+    cmd.Parameters.AddWithValue("store",(object?)store??DBNull.Value);
+    cmd.Parameters.AddWithValue("action",action);
+    cmd.Parameters.AddWithValue("target",target);
+    cmd.Parameters.AddWithValue("details",details);
+    await cmd.ExecuteNonQueryAsync();
+}
+
 async Task<bool> Authed(HttpContext ctx)
 {
     var bearer = ctx.Request.Headers.Authorization.ToString();
@@ -640,6 +660,95 @@ async Task QueueLowStock(NpgsqlConnection c,NpgsqlTransaction tx,Guid itemId,str
     queue.Parameters.AddWithValue("item",itemId);queue.Parameters.AddWithValue("store",store);
     await queue.ExecuteNonQueryAsync();
 }
+
+app.MapGet("/api/items/export",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("""
+        SELECT sku,name,COALESCE(barcode,''),COALESCE(category,''),quantity,min_stock,unit_cost,COALESCE(description,'')
+        FROM items WHERE store_id=@store AND deleted_at IS NULL ORDER BY name,sku
+        """,c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
+    var csv=new StringBuilder("SKU,Product,Barcode,Category,Quantity,Minimum Stock,Unit Cost,Description\r\n");
+    await using var r=await cmd.ExecuteReaderAsync();
+    while(await r.ReadAsync()){
+        csv.Append(CsvField(r.GetString(0))).Append(',').Append(CsvField(r.GetString(1))).Append(',')
+           .Append(CsvField(r.GetString(2))).Append(',').Append(CsvField(r.GetString(3))).Append(',')
+           .Append(r.GetInt32(4)).Append(',').Append(r.GetInt32(5)).Append(',');
+        if(!r.IsDBNull(6))csv.Append(r.GetDecimal(6).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        csv.Append(',').Append(CsvField(r.GetString(7))).Append("\r\n");
+    }
+    return CsvFile(csv.ToString(),"zagg-inventory-"+Regex.Replace(who.Value.store,@"[^A-Za-z0-9_-]","_")+".csv");
+});
+app.MapGet("/api/items/reorder",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("""
+        SELECT id,sku,name,quantity,min_stock,COALESCE(category,''),COALESCE(barcode,'')
+        FROM items WHERE store_id=@store AND deleted_at IS NULL AND quantity<=min_stock
+        ORDER BY quantity ASC,name ASC
+        """,c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
+    await using var r=await cmd.ExecuteReaderAsync();
+    var list=new List<object>();
+    while(await r.ReadAsync()){
+        var qty=r.GetInt32(3);var min=r.GetInt32(4);
+        list.Add(new{id=r.GetGuid(0),sku=r.GetString(1),name=r.GetString(2),quantity=qty,minStock=min,category=r.GetString(5),barcode=r.GetString(6),reorderQty=Math.Max(1,(long)min+1-qty)});
+    }
+    return Results.Ok(list);
+});
+app.MapGet("/api/items/reorder/export",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("""
+        SELECT sku,name,quantity,min_stock,COALESCE(category,''),COALESCE(barcode,'')
+        FROM items WHERE store_id=@store AND deleted_at IS NULL AND quantity<=min_stock
+        ORDER BY quantity ASC,name ASC
+        """,c);
+    cmd.Parameters.AddWithValue("store",who.Value.store);
+    var csv=new StringBuilder("SKU,Product,Current Stock,Minimum Stock,Order Quantity (to exceed minimum),Category,Barcode\r\n");
+    await using var r=await cmd.ExecuteReaderAsync();
+    while(await r.ReadAsync()){
+        csv.Append(CsvField(r.GetString(0))).Append(',').Append(CsvField(r.GetString(1))).Append(',')
+           .Append(r.GetInt32(2)).Append(',').Append(r.GetInt32(3)).Append(',')
+           .Append(Math.Max(1,(long)r.GetInt32(3)+1-r.GetInt32(2))).Append(',')
+           .Append(CsvField(r.GetString(4))).Append(',').Append(CsvField(r.GetString(5))).Append("\r\n");
+    }
+    return CsvFile(csv.ToString(),"zagg-reorder-"+Regex.Replace(who.Value.store,@"[^A-Za-z0-9_-]","_")+".csv");
+});
+app.MapGet("/api/items/{id:guid}/history",async (HttpContext ctx,Guid id)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    await using var c=await Connect();
+    await using(var exists=new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM items WHERE id=@id AND store_id=@store AND deleted_at IS NULL)",c)){
+        exists.Parameters.AddWithValue("id",id);exists.Parameters.AddWithValue("store",who.Value.store);
+        if(!(bool)(await exists.ExecuteScalarAsync()??false))return Results.NotFound();
+    }
+    await using var cmd=new NpgsqlCommand("""
+        SELECT m.id,m.delta,m.before_qty,m.after_qty,m.created_at,COALESCE(m.note,''),m.employee_id
+        FROM movements m WHERE m.item_id=@id AND m.store_id=@store
+        ORDER BY m.id DESC LIMIT 200
+        """,c);
+    cmd.Parameters.AddWithValue("id",id);cmd.Parameters.AddWithValue("store",who.Value.store);
+    await using var r=await cmd.ExecuteReaderAsync();
+    var list=new List<object>();
+    while(await r.ReadAsync())list.Add(new{id=r.GetInt64(0),delta=r.GetInt32(1),before=r.GetInt32(2),after=r.GetInt32(3),time=r.GetDateTime(4),note=r.GetString(5),employeeId=r.GetString(6)});
+    return Results.Ok(list);
+});
+app.MapGet("/api/admin/audit",async (HttpContext ctx)=>{
+    var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
+    if(!who.Value.admin)return Results.Forbid();
+    await using var c=await Connect();
+    await using var cmd=new NpgsqlCommand("""
+        SELECT id,occurred_at,actor_employee_id,store_id,action,target,details
+        FROM admin_audit WHERE @global OR store_id=@store
+        ORDER BY id DESC LIMIT 200
+        """,c);
+    cmd.Parameters.AddWithValue("global",who.Value.globalAdmin);cmd.Parameters.AddWithValue("store",who.Value.store);
+    await using var r=await cmd.ExecuteReaderAsync();
+    var list=new List<object>();
+    while(await r.ReadAsync())list.Add(new{id=r.GetInt64(0),time=r.GetDateTime(1),employeeId=r.GetString(2),storeId=r.IsDBNull(3)?null:r.GetString(3),action=r.GetString(4),target=r.GetString(5),details=r.GetString(6)});
+    return Results.Ok(list);
+});
 app.MapGet("/api/items", async (HttpContext ctx) =>
 {
     var who=await Identity(ctx);if(who is null)return Results.Unauthorized();
@@ -782,6 +891,17 @@ await using (var c=await Connect())
     await using var cmd=new NpgsqlCommand("""
     CREATE TABLE IF NOT EXISTS settings(key text PRIMARY KEY,value text NOT NULL);
     CREATE TABLE IF NOT EXISTS auth_login_failures(attempt_key text PRIMARY KEY,failures integer NOT NULL,last_failure timestamptz NOT NULL,blocked_until timestamptz);
+    CREATE TABLE IF NOT EXISTS admin_audit(
+        id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        occurred_at timestamptz NOT NULL DEFAULT now(),
+        actor_employee_id text NOT NULL,
+        store_id text,
+        action text NOT NULL,
+        target text NOT NULL,
+        details text NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS admin_audit_by_store_time ON admin_audit(store_id,occurred_at DESC,id DESC);
+
     CREATE TABLE IF NOT EXISTS stores(id text PRIMARY KEY,name text NOT NULL,active boolean NOT NULL DEFAULT true);
     CREATE TABLE IF NOT EXISTS store_alert_settings(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,enabled boolean NOT NULL DEFAULT false,recipients text NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS google_store_accounts(store_id text PRIMARY KEY REFERENCES stores(id) ON UPDATE CASCADE,email text NOT NULL,refresh_token text NOT NULL,connected_by text NOT NULL,connected_at timestamptz NOT NULL DEFAULT now());
