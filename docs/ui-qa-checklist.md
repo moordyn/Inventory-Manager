@@ -40,6 +40,19 @@ These tests are required before calling a deployment production-ready. Automated
 - [ ] A valid Google OAuth import works; returning from Google does not trigger a spurious logout.
 - [ ] Long recipient addresses wrap, and all admin forms fit within the mobile viewport.
 
+## Inventory reporting and administrative activity
+- [ ] Export inventory CSV from a populated store; verify every active SKU appears, including beyond the first page of displayed inventory
+- [ ] CSV fields with commas, quotes or formula characters open as text without executing formulas
+- [ ] Click the low-stock count and confirm it opens the reorder list for the selected location
+- [ ] Check that a product at the minimum threshold suggests ordering one unit and one above the minimum no longer appears
+- [ ] Export the reorder CSV; confirm current/minimum/order quantities and store isolation
+- [ ] Open Edit → View history, verify stock movement order, employee, before/after values and reason
+- [ ] Toggle product history while the edit form contains unsaved changes; verify those fields are retained
+- [ ] Use +1, +5, −1, −5 quick adjustment presets; verify checkout reason, explicit Save and no negative balance
+- [ ] Review admin activity after granting/removing access, editing roles, changing alert preferences and deleting a product
+- [ ] Confirm store admins only see their store's admin activity while global admins see activity across all stores
+- [ ] Rename a store and ensure its existing activity history remains linked to the new store ID
+
 ## Release readiness beyond visual checks
 - [ ] CI .NET Release build passes.
 - [ ] Validate schema migrations against a copy of production PostgreSQL.
