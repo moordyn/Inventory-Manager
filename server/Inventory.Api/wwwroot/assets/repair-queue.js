@@ -8,6 +8,7 @@ const safe=v=>esc(v??'');
 const usd=v=>money(Number(v||0));
 const key=()=>crypto.randomUUID();
 const closed=t=>t.status==='completed'||t.status==='cancelled';
+const displayStatus=t=>t.pickedUpAt?'Paid / Picked Up':t.status==='completed'?'Completed · Awaiting Pickup':status(t.status);
 const status=v=>STATUS[v]||v;
 function reset(){
  version++;rows=[];historical=false;cameraTicketId=null;loading=false;
@@ -20,12 +21,12 @@ function renderList(){
  if(!el||!summary)return;
  const search=$r('repairSearch').value.trim().toLowerCase();
  const list=rows.filter(r=>(r.id+' '+r.device+' '+r.repairType+' '+r.createdByName+' '+r.createdBy+' '+r.customerName+' '+r.serialNumber).toLowerCase().includes(search));
- summary.textContent=list.length+' '+(historical?'closed':'active')+' repair'+(list.length===1?'':'s')+(historical?' · newest closed first':' · oldest check-in first');
+ summary.textContent=list.length+' '+(historical?'closed':'active')+' repair'+(list.length===1?'':'s')+(historical?' · most recently picked up / closed first':' · oldest check-in first · completed repairs await pickup');
  el.innerHTML=list.length?list.map(r=>
   '<article class="repair-ticket">'+
    '<div class="repair-ticket-head"><div><small class="muted">Repair #'+Number(r.id)+' · '+safe(time(r.createdAt))+'</small>'+
    '<h3>'+safe(r.device)+'</h3><p class="repair-ticket-meta">'+safe(r.repairType)+(r.customerName?' · '+safe(r.customerName):'')+'</p></div>'+
-   '<span class="repair-ticket-status">'+safe(status(r.status))+'</span></div>'+
+   '<span class="repair-ticket-status">'+safe(displayStatus(r))+'</span></div>'+
    '<div class="repair-ticket-summary">'+
     '<div><small>Quoted</small><strong>'+usd(r.quotedTotal)+'</strong></div>'+
     '<div><small>Paid upfront</small><strong>'+usd(r.paidUpfront)+'</strong></div>'+
@@ -33,8 +34,8 @@ function renderList(){
     '<div><small>Parts used</small><strong>'+Number(r.partsUsed)+'</strong></div></div>'+
    '<div class="repair-ticket-footer"><div class="repair-ticket-meta">Checked in by <strong>'+safe(r.createdByName)+' ('+safe(r.createdBy)+')</strong><br>'+
     'Technician: '+safe(r.createdByName)+' ('+safe(r.createdBy)+')'+'</div>'+
-    '<button type="button" class="btn" data-repair-open="'+Number(r.id)+'">Open ticket</button></div></article>'
- ).join(''):'<div class="empty">'+(historical?'No completed or cancelled repairs.':'No active repairs at this location.')+'</div>';
+    '<button type="button" class="btn" data-repair-open="'+Number(r.id)+'">'+(r.status==='completed'&&!r.pickedUpAt?'Complete pickup →':'Open ticket')+'</button></div></article>'
+ ).join(''):'<div class="empty">'+(historical?'No paid/picked-up or cancelled repairs.':'No active repairs at this location.')+'</div>';
 }
 async function refresh(){
  if(loading||!identity||!$r('view-repairs')?.classList.contains('active'))return;
@@ -94,16 +95,16 @@ async function openTicket(id,scanned=''){
  modal('Repair #'+id+' · '+t.device,
   '<p class="repair-ticket-meta">'+safe(t.repairType)+' · Checked in '+safe(time(t.createdAt))+'</p>'+
   '<div class="repair-detail-info" style="margin-top:13px">'+
-   field('Checked in by',t.createdByName+' ('+t.createdBy+')')+field('Status',status(t.status))+
+   field('Checked in by',t.createdByName+' ('+t.createdBy+')')+field('Status',displayStatus(t))+
    field('Quoted',usd(t.quotedTotal))+field('Upfront',usd(t.paidUpfront))+
-   field('Additional paid',usd(t.additionalPaid))+field('Balance due',usd(t.balanceDue))+
+   field('Final payment',usd(t.additionalPaid))+field('Balance due',usd(t.balanceDue))+
    field('Customer',t.customerName)+field('Contact',t.customerContact)+
    field('Serial / IMEI',t.serialNumber)+field('Technician (checked in by)',t.createdByName+' ('+t.createdBy+')')+'</div>'+
   (t.notes?'<p class="repair-muted"><strong>Internal notes:</strong> '+safe(t.notes)+'</p>':'')+
   '<section class="repair-details-section"><h3>Repair status</h3>'+
    '<div class="repair-inline-control"><div><label for="repairStatusSelect">Status</label><select id="repairStatusSelect">'+statusOptions+'</select></div>'+
    '<button type="button" class="btn" id="repairStatusSave">Update status</button></div>'+
-   '<p class="repair-muted">Completed and cancelled repairs move to history. Reopen a ticket before adding parts.</p></section>'+
+   '<p class="repair-muted">Completed repairs remain in the queue until the balance is received and the device is picked up. Paid/picked-up tickets move to history.</p></section>'+
   '<section class="repair-details-section"><h3>Parts used</h3><div class="repair-detail-list">'+(partLines||'<p class="muted">No parts recorded yet.</p>')+'</div>'+
    '<form id="repairPartForm"><div class="repair-inline-control">'+
    '<div><label for="repairPartCode">Scan / enter SKU or barcode</label><input id="repairPartCode" maxlength="150" placeholder="Barcode or SKU" autocomplete="off" value="'+safe(scanned)+'"></div>'+
@@ -112,12 +113,17 @@ async function openTicket(id,scanned=''){
    '<div style="flex:0 1 100px"><label for="repairPartQty">Quantity</label><input id="repairPartQty" type="number" min="1" max="10000" step="1" value="1" required></div>'+
    '<button class="btn primary" id="repairAddPart"'+(lock?' disabled':'')+'>Deduct & add</button></div>'+
    '<p class="repair-muted">Each confirmed part deducts store stock and creates a linked checkout entry. Returns create a reversing stock movement.</p></form></section>'+
-  '<section class="repair-details-section"><h3>Payments</h3><div class="repair-payments"><div>Upfront: '+usd(t.paidUpfront)+'</div>'+
-   (payments||'<div>No additional payments yet.</div>')+'</div>'+
-   '<form id="repairPaymentForm" class="repair-inline-control"><div><label for="repairPaymentAmount">Additional payment ($)</label>'+
-   '<input id="repairPaymentAmount" type="number" min=".01" max="'+Number(t.balanceDue)+'" step=".01" placeholder="0.00" required></div>'+
-   '<button class="btn" id="repairPaymentSave"'+(Number(t.balanceDue)<=0||t.status==='cancelled'?' disabled':'')+'>Record payment</button></form>'+
-   '<p class="repair-muted">Tracking only; no money is charged or refunded by this app.</p></section>'+
+  '<section class="repair-details-section"><h3>Payment and pickup</h3>'+
+   '<div class="repair-payments"><div>Deposit at check-in: '+usd(t.paidUpfront)+'</div>'+
+   (payments||'<div>No final payment recorded yet.</div>')+
+   '<div><strong>Balance to collect: '+usd(t.balanceDue)+'</strong></div></div>'+
+   (t.pickedUpAt
+     ?'<p class="repair-ticket-status">Paid / Picked Up</p><p class="repair-muted">Confirmed '+safe(time(t.pickedUpAt))+' by '+safe(t.pickedUpBy||'—')+'</p>'
+     :t.status==='completed'
+      ?'<p class="repair-muted">Confirm that the customer has paid the remaining '+usd(t.balanceDue)+' and has collected the device. This action is final.</p>'+
+       '<button type="button" class="btn primary" id="repairConfirmPickup">Mark Paid / Picked Up</button>'
+      :'<p class="repair-muted">Available after the repair is marked Completed. Only the initial deposit and the final remaining balance are recorded.</p>')+
+   '<p class="repair-muted">For tracking only: Inventory Manager does not charge cards or process refunds.</p></section>'+
   '<section class="repair-details-section"><h3>Activity history</h3><div class="repair-events">'+(timeline||'<p class="muted">No activity yet.</p>')+'</div></section>');
  $r('repairStatusSave').onclick=async()=>{
   const button=$r('repairStatusSave');if(button.disabled)return;button.disabled=true;
@@ -147,18 +153,20 @@ async function openTicket(id,scanned=''){
   if(!navigator.mediaDevices?.getUserMedia){toast('Camera requires HTTPS and camera permission. Enter the code manually.',true);return}
   cameraTicketId=id;$r('cameraBtn').click();
  };
- const paymentForm=$r('repairPaymentForm');
- paymentForm.addEventListener('input',()=>delete paymentForm.dataset.requestKey);
- paymentForm.onsubmit=async e=>{
-  e.preventDefault();const button=$r('repairPaymentSave'),amount=Number($r('repairPaymentAmount').value);
-  if(button.disabled)return;
-  if(!Number.isFinite(amount)||amount<=0||amount>Number(t.balanceDue)){toast('Invalid payment amount.',true);return}
-  button.disabled=true;paymentForm.dataset.requestKey||=key();
-  try{
-   const result=await api('repairs/'+id+'/payments','POST',{amount,idempotencyKey:paymentForm.dataset.requestKey});
-   toast(result.duplicate?'Payment already recorded.':'Payment recorded');await refresh();await openTicket(id);
-  }catch(err){toast(err.message,true);button.disabled=false}
- };
+ if(t.status==='completed'&&!t.pickedUpAt){
+  const button=$r('repairConfirmPickup');
+  button.onclick=async()=>{
+   if(button.disabled)return;
+   if(!window.confirm('Confirm the customer paid the remaining '+usd(t.balanceDue)+' and picked up the device? This will close the repair.'))return;
+   button.disabled=true;button.textContent='Confirming pickup…';
+   button.dataset.requestKey||=key();
+   try{
+    const result=await api('repairs/'+id+'/pickup','POST',{idempotencyKey:button.dataset.requestKey});
+    toast(result.duplicate?'Pickup was already recorded.':'Repair paid and picked up');
+    await refresh();await openTicket(id);
+   }catch(err){toast('Pickup not recorded: '+err.message,true);button.disabled=false;button.textContent='Mark Paid / Picked Up'}
+  };
+ }
  $r('modalRoot').querySelectorAll('[data-repair-return]').forEach(button=>{
   button.onclick=async()=>{
    if(button.disabled)return;
