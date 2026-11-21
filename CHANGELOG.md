@@ -6,7 +6,7 @@ This project uses [Semantic Versioning](https://semver.org/). Repository tags an
 
 ## Unreleased — next feature release
 
-- Added a separate passive signed-in dashboard background with slow theme-colored light clouds, fixed-size viewport rendering, capped frame rate, reduced-motion fallback and no pointer interaction.
+- Added a separate passive signed-in dashboard background with more prominent, overlapping drifting theme-colored light clouds, slightly translucent/blurred surfaces, fixed-size viewport rendering, capped frame rate, reduced-motion fallback and no pointer interaction.
 - Animated theme-aware sign-in aurora: ambient drifting color clouds and pointer/touch light trails, with a reduced-motion fallback, paused background rendering and mobile-friendly frame caps.
 - Added ten cohesive palettes: Evergreen (mint), Deep Purple, Midnight Ocean, Copper Ember, Rose Noir, Arctic Slate, Forest Night, Champagne Gold, Crimson Night, and Glacier Light (**light mode**).
 - Employees choose their own persistent dashboard palette from **Settings → Appearance**, maintained by server-side account preferences and applied across devices.
