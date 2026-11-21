@@ -55,6 +55,7 @@ finally:
     if os.path.exists(temp):
         os.unlink(temp)
 print("Google OAuth credentials written to the private server .env (values hidden).")
-print("Restart the API using: cd /opt/inventory-manager && docker compose --env-file .env -f deploy/compose.yml up -d --build")
+print("Google OAuth configuration saved. Restarting the API will activate sign-in.")
 print("Remove the original OAuth JSON file from the server after verification.")
 PY
+\ncd "$APP"\ndocker compose --env-file .env -f deploy/compose.yml up -d --build\necho "Google OAuth setup applied. Open Administration > Low-stock email alerts to connect a store account."\n
