@@ -295,6 +295,8 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
  .product-history-table td::before{content:attr(data-label);display:block;margin-bottom:3px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.4px}
  .product-history-table td:nth-child(4),.product-history-table td:nth-child(6){grid-column:1/-1}
 }
+.stat-num.stat-num-button{font-size:clamp(24px,2.3vw,33px);font-weight:790;letter-spacing:-.9px}
+@media(max-width:760px){.stat-num.stat-num-button{font-size:clamp(21px,6vw,28px)}}
 </style></head><body>
 <div id="auth" class="login-screen"><div class="card login-card"><div class="brand brand-login"><img class="brand-wordmark brand-wordmark-login" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async" fetchpriority="high"></div><div id="setup" class="hidden"><h1>Set up your inventory</h1><p>Enter the one-time installation token, then create a six-digit PIN.</p><form id="setupForm"><label for="setupToken">Installation token</label><input id="setupToken" required autocomplete="off"><label for="newPin">New PIN</label><input id="newPin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><label for="confirmPin">Confirm PIN</label><input id="confirmPin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><button class="btn primary">Create PIN</button></form></div><div id="employeeLogin" class="hidden"><h1>Employee sign in</h1><p>Enter your employee ID to access your assigned store.</p><form id="employeeForm"><label for="employeeId">Employee ID</label><input id="employeeId" required autocomplete="off"><button class="btn primary">Access inventory</button></form><p style="margin-top:20px"><button class="btn ghost" id="adminLoginBtn">Administrator access</button></p></div><div id="login" class="hidden"><h1>Welcome back</h1><p>Enter your six-digit PIN to access your inventory.</p><form id="loginForm"><label for="adminEmployeeId">Administrator Employee ID</label><input id="adminEmployeeId" autocomplete="off" placeholder="OWNER" value="OWNER" required><label for="pin">Access PIN</label><input id="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="off" autofocus><button class="btn primary">Unlock administration</button></form><p style="margin-top:18px"><button type="button" class="btn ghost" id="employeeLoginBtn">Employee login</button></p></div><div id="authLoading" class="muted" style="padding:12px 0" role="status">Connecting to the inventory server…</div><div id="authMsg" class="message" role="status" aria-live="polite"></div></div></div>
 <div id="app" class="shell hidden"><aside class="sidebar"><div class="brand brand-sidebar"><img class="brand-wordmark brand-wordmark-sidebar" src="/assets/zagg-wordmark.svg" alt="ZAGG Inventory Manager" width="900" height="358" decoding="async"><div id="locationBrand" class="brand-location">Store location</div></div><nav class="nav" id="sideNav" aria-label="Main navigation"><button data-page="overview" class="active"><span>▦</span> Overview</button><button data-page="inventory"><span>▤</span> Inventory</button><button data-page="checkin"><span>↙</span> Check In</button><button data-page="checkout"><span>↗</span> Check Out</button><button data-page="history"><span>◷</span> History</button><button data-page="settings"><span>⚙</span> Settings</button><button data-page="administration" id="adminNav" class="hidden"><span>♙</span> Administration</button></nav><div class="sidebar-foot"><div style="color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase">Signed in as</div><div id="signedInEmployee" style="font-size:15px;font-weight:700;color:#f0f2f5;overflow-wrap:anywhere;margin-top:4px">—</div><div id="signedInEmployeeId" style="margin-top:3px">—</div><button type="button" class="btn warn" id="sidebarLogoutBtn" style="width:100%;margin-top:12px">Sign out</button><div id="idleCountdown" style="margin-top:8px;font-size:11px" aria-live="off">Auto sign-out after 30s inactivity</div><div style="margin-top:16px">ZAGG Inventory Manager · Secure inventory access</div></div></aside>
@@ -386,7 +388,7 @@ td small{display:block;margin-top:3px;color:#9bacbb;font-size:11px}
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
-let token=sessionStorage.getItem('inventory-token')||'',items=[],history=[],page='overview',busy=false,stream=null,identity=null,allowedStores=[];
+let token=sessionStorage.getItem('inventory-token')||'',items=[],history=[],reorderRows=[],page='overview',busy=false,stream=null,identity=null,allowedStores=[];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=x=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(Number(x||0));
 const time=x=>new Date(x).toLocaleString();
@@ -433,7 +435,7 @@ function logout(send=true){
  if($('modalRoot').firstElementChild)closeModal();
  if(idleTimer!==null){clearInterval(idleTimer);idleTimer=null;}
  if(send&&token)api('auth/logout','POST').catch(()=>{});
- token='';identity=null;allowedStores=[];items=[];history=[];
+ token='';identity=null;allowedStores=[];items=[];history=[];reorderRows=[];
  sessionStorage.removeItem('inventory-token');
  $('app').classList.add('hidden');$('auth').classList.remove('hidden');
  $('signedInEmployee').textContent='—';$('signedInEmployeeId').textContent='—';$('mobileEmployeeName').textContent='Employee';$('mobileIdleCountdown').textContent='';
@@ -449,12 +451,13 @@ function navigate(next){
  $('mainToolbar').classList.toggle('hidden',!['overview','inventory','checkin','checkout'].includes(next));
  document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id==='view-'+next));
  document.querySelectorAll('[data-page]').forEach(el=>{
-   const active=el.dataset.page===next;
+   const active=el.dataset.page===next||(next==='reorder'&&el.dataset.page==='inventory');
    el.classList.toggle('active',active);
    if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');
  });
- $('pageTitle').textContent=({overview:'Overview',inventory:'Inventory',checkin:'Check In',checkout:'Check Out',history:'History',settings:'Settings',administration:'Administration'})[next]||next;
+ $('pageTitle').textContent=({overview:'Overview',inventory:'Inventory',checkin:'Check In',checkout:'Check Out',history:'History',reorder:'Reorder List',settings:'Settings',administration:'Administration'})[next]||next;
  if(next==='administration')loadAdmin();
+ if(next==='reorder')loadReorder();
  window.scrollTo({top:0,behavior:'smooth'});
  render();
 }
@@ -464,6 +467,57 @@ function itemRow(x){return '<tr><td data-label="Product"><div class="item-name">
 function itemTable(list){return list.length?'<table class="inventory-responsive"><thead><tr><th>Product / SKU</th><th>Category</th><th>Stock</th><th>Status</th><th></th></tr></thead><tbody>'+list.map(itemRow).join('')+'</tbody></table>':'<div class="empty">No matching products found</div>'}
 function historyTable(list){return list.length?'<table class="history-responsive"><thead><tr><th>Product</th><th>Movement</th><th>Balance</th><th>When</th><th>Employee</th><th>Note</th></tr></thead><tbody>'+list.map(x=>'<tr><td data-label="Product">'+esc(x.name)+'<br><small>'+esc(x.sku)+'</small></td><td data-label="Movement" class="'+(x.delta>0?'accent':'amber')+'">'+(x.delta>0?'+':'')+x.delta+'</td><td data-label="Balance">'+x.after+'</td><td data-label="When">'+esc(time(x.time))+'</td><td data-label="Employee">'+esc(x.employeeId||'LEGACY')+'</td><td data-label="Note">'+esc(x.note||'—')+'</td></tr>').join('')+'</tbody></table>':'<div class="empty">No transactions yet</div>'}
 function render(){if(!items)return;const q=$('globalScan').value.trim().toLowerCase();let list=items.filter(x=>(x.name+' '+x.sku+' '+(x.barcode||'')+' '+(x.category||'')).toLowerCase().includes(q));if($('stockFilter').value==='low')list=list.filter(x=>x.quantity<=x.minStock);if($('stockFilter').value==='available')list=list.filter(x=>x.quantity>0);$('inventoryCount').textContent=list.length.toLocaleString()+' product'+(list.length===1?'':'s')+' shown'+(q?' matching your search':'');$('inventoryTable').innerHTML=itemTable(list);$('recentItems').innerHTML=itemTable(items.slice(0,6));$('recentHistory').innerHTML=historyTable(history.slice(0,6));$('historyTable').innerHTML=historyTable(history);for(const direction of ['checkin','checkout']){const el=$(direction+'Item'),selected=el.value;el.innerHTML=items.map(x=>'<option value="'+x.id+'">'+esc(x.name)+' — '+esc(x.sku)+' ('+x.quantity+' in stock)</option>').join('');if(items.some(x=>x.id===selected))el.value=selected}}
+
+async function loadReorder(){
+ if(!identity)return;
+ const store=identity.storeId;
+ $('reorderSummary').textContent='Loading low-stock products…';
+ $('reorderTable').innerHTML='<div class="empty">Checking stock levels…</div>';
+ try{
+  const rows=await api('items/reorder');
+  if(!identity||store!==identity.storeId)return;
+  reorderRows=rows;
+  const total=rows.reduce((sum,x)=>sum+Number(x.reorderQty),0);
+  $('reorderSummary').textContent=rows.length
+    ?rows.length.toLocaleString()+' product'+(rows.length===1?'':'s')+' need restocking · '+total.toLocaleString()+' units to order to exceed minimum stock levels'
+    :'All stocked products are above their minimum levels.';
+  $('reorderTable').innerHTML=rows.length
+   ?'<table class="inventory-responsive"><thead><tr><th>Product / SKU</th><th>Category</th><th>Current</th><th>Minimum</th><th>Order Qty</th><th>Action</th></tr></thead><tbody>'+
+     rows.map(x=>'<tr><td data-label="Product"><div class="item-name">'+esc(x.name)+'</div><small>'+esc(x.sku)+'</small></td><td data-label="Category">'+esc(x.category||'—')+'</td><td data-label="Current"><strong class="amber">'+Number(x.quantity)+'</strong></td><td data-label="Minimum">'+Number(x.minStock)+'</td><td data-label="Order Quantity"><strong>'+Number(x.reorderQty)+'</strong></td><td data-label="Action"><button class="btn" type="button" data-reorder-adjust="'+esc(x.id)+'">Adjust stock</button></td></tr>').join('')+
+    '</tbody></table>'
+   :'<div class="empty">Nothing to reorder right now.</div>';
+ }catch(err){$('reorderSummary').textContent='Reorder list unavailable';$('reorderTable').innerHTML='<div class="empty">'+esc(err.message)+'</div>';}
+}
+$('reorderTable').onclick=e=>{
+ const button=e.target.closest('[data-reorder-adjust]');
+ if(!button)return;
+ const item=reorderRows.find(x=>x.id===button.dataset.reorderAdjust);
+ if(item)openMovement(item);
+};
+async function downloadReport(path,filename){
+ const response=await fetch('/api/'+path,{headers:{Authorization:'Bearer '+token}});
+ if(!response.ok){
+  if(response.status===401){logout(false);throw Error('Session expired. Sign in again.')}
+  throw Error((await response.text()).slice(0,200)||'Could not download report.');
+ }
+ const blob=await response.blob();
+ const url=URL.createObjectURL(blob);
+ const link=document.createElement('a');
+ link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+$('exportInventoryBtn').onclick=async()=>{
+ const button=$('exportInventoryBtn');button.disabled=true;button.textContent='Exporting…';
+ try{await downloadReport('items/export','zagg-inventory-'+(identity?.storeId||'store')+'.csv');toast('Inventory CSV downloaded')}
+ catch(err){toast('Export failed: '+err.message,true)}
+ finally{button.disabled=false;button.textContent='↓ Export inventory CSV'}
+};
+$('exportReorderBtn').onclick=async()=>{
+ const button=$('exportReorderBtn');button.disabled=true;button.textContent='Exporting…';
+ try{await downloadReport('items/reorder/export','zagg-reorder-'+(identity?.storeId||'store')+'.csv');toast('Reorder CSV downloaded')}
+ catch(err){toast('Export failed: '+err.message,true)}
+ finally{button.disabled=false;button.textContent='↓ Export reorder CSV'}
+};
 $('stockFilter').onchange=render;$('globalScan').oninput=()=>{if(page!=='inventory')navigate('inventory');else render()};
 $('globalScan').onkeydown=async e=>{if(e.key!=='Enter')return;e.preventDefault();const code=$('globalScan').value.trim();if(!code)return;const found=items.find(x=>x.sku.toLowerCase()===code.toLowerCase()||x.barcode?.toLowerCase()===code.toLowerCase());if(found){openMovement(found)}else{try{const remote=await api('items/lookup/'+encodeURIComponent(code));const item=items.find(x=>x.id===remote.id)||remote;openMovement(item)}catch{openItem(null,code)}}};
 let activeScannerStop=null;
@@ -666,7 +720,7 @@ $('storePicker').onchange=async e=>{
  const selected=e.target.value,previous=identity.storeId;
  try{
    await api('auth/select-store','POST',{storeId:selected});
-   identity=await api('auth/me');$('adminNav').classList.toggle('hidden',!identity.isAdmin);items=[];history=[];updateLocationBrand();
+   identity=await api('auth/me');$('adminNav').classList.toggle('hidden',!identity.isAdmin);items=[];history=[];reorderRows=[];updateLocationBrand();
    $('serverHost').textContent=location.host+' · '+identity.storeId+' / '+identity.employeeId;
    navigate('overview');await load();toast('Store changed');
  }catch(err){e.target.value=previous;toast('Unable to switch stores: '+err.message,true)}
